@@ -1,0 +1,717 @@
+<template>
+  <section class="algorithm-manager">
+    <header class="manager-header">
+      <div>
+        <span class="eyebrow">负载均衡算法</span>
+        <h1>算法参数配置</h1>
+      </div>
+      <button type="button" :disabled="loading" @click="refreshOverview">
+        {{ loading ? '刷新中...' : '刷新算法' }}
+      </button>
+    </header>
+
+    <div v-if="error" class="notice error" role="alert">
+      {{ error }}
+    </div>
+
+    <div v-if="actionNotice" class="notice success" role="status">
+      {{ actionNotice }}
+    </div>
+
+    <div class="manager-layout">
+      <aside class="algorithm-list" aria-label="算法列表">
+        <div class="section-title">
+          <strong>后端算法</strong>
+          <span>{{ algorithms.length }} 项</span>
+        </div>
+
+        <button
+          v-for="algorithm in algorithms"
+          :key="algorithm.algorithm_id"
+          type="button"
+          class="algorithm-item"
+          :class="{
+            active: algorithm.algorithm_id === state.selectedAlgorithmId,
+            unavailable: algorithm.runtime_available === false
+          }"
+          @click="selectAlgorithm(algorithm.algorithm_id)"
+        >
+          <span class="algorithm-main">
+            <strong>{{ algorithm.name || algorithm.algorithm_id }}</strong>
+            <small>{{ algorithm.algorithm_id }}</small>
+          </span>
+          <span class="runtime-badge" :class="{ off: algorithm.runtime_available === false }">
+            {{ algorithm.runtime_available === false ? '不可用' : '可运行' }}
+          </span>
+        </button>
+
+        <div v-if="!loading && algorithms.length === 0" class="empty-box">
+          后端暂未返回算法列表
+        </div>
+      </aside>
+
+      <main class="algorithm-detail">
+        <div v-if="selectedAlgorithm" class="detail-grid">
+          <section class="detail-panel summary-panel">
+            <div>
+              <span class="eyebrow">当前选择</span>
+              <h2>{{ selectedAlgorithm.name || selectedAlgorithm.algorithm_id }}</h2>
+              <p>{{ selectedAlgorithm.description || '后端未提供算法说明' }}</p>
+            </div>
+
+            <dl>
+              <div>
+                <dt>算法 ID</dt>
+                <dd>{{ selectedAlgorithm.algorithm_id }}</dd>
+              </div>
+              <div>
+                <dt>版本</dt>
+                <dd>{{ selectedAlgorithm.version || '-' }}</dd>
+              </div>
+              <div>
+                <dt>插件类型</dt>
+                <dd>{{ selectedAlgorithm.plugin_type || '-' }}</dd>
+              </div>
+              <div>
+                <dt>Legacy ID</dt>
+                <dd>{{ selectedAlgorithm.legacy_id || '-' }}</dd>
+              </div>
+            </dl>
+          </section>
+
+          <section
+            v-if="selectedAlgorithm.runtime_available === false"
+            class="notice warning"
+            role="status"
+          >
+            该算法当前不可应用：{{ selectedAlgorithm.runtime_registry_error || 'dispatcher 尚未加载运行时插件' }}
+          </section>
+
+          <section class="detail-panel parameter-panel">
+            <div class="section-title">
+              <strong>动态参数</strong>
+              <span>{{ parameterEntries.length }} 项</span>
+            </div>
+
+            <div v-if="parameterEntries.length" class="parameter-list">
+              <label
+                v-for="entry in parameterEntries"
+                :key="entry.name"
+                class="parameter-field"
+                :class="{ invalid: state.parameterErrors[entry.name] }"
+              >
+                <span class="field-head">
+                  <strong>{{ entry.name }}</strong>
+                  <small>{{ formatParameterMeta(entry.definition) }}</small>
+                </span>
+
+                <select
+                  v-if="entry.definition.enum"
+                  :value="state.parameterDraft[entry.name]"
+                  @change="updateParameter(entry.name, readFormValue(entry.definition, $event.target.value))"
+                >
+                  <option value="">请选择</option>
+                  <option
+                    v-for="item in entry.definition.enum"
+                    :key="String(item)"
+                    :value="String(item)"
+                  >
+                    {{ formatParameterValue(item) }}
+                  </option>
+                </select>
+
+                <span v-else-if="entry.definition.type === 'boolean'" class="switch-field">
+                  <input
+                    type="checkbox"
+                    :checked="Boolean(state.parameterDraft[entry.name])"
+                    @change="updateParameter(entry.name, $event.target.checked)"
+                  />
+                  <em>{{ state.parameterDraft[entry.name] ? '开启' : '关闭' }}</em>
+                </span>
+
+                <input
+                  v-else-if="entry.definition.type === 'integer'"
+                  type="number"
+                  step="1"
+                  :min="entry.definition.minimum"
+                  :max="entry.definition.maximum"
+                  :value="state.parameterDraft[entry.name] ?? ''"
+                  @input="updateParameter(entry.name, $event.target.value)"
+                />
+
+                <input
+                  v-else-if="entry.definition.type === 'number'"
+                  type="number"
+                  step="any"
+                  :min="entry.definition.minimum"
+                  :max="entry.definition.maximum"
+                  :value="state.parameterDraft[entry.name] ?? ''"
+                  @input="updateParameter(entry.name, $event.target.value)"
+                />
+
+                <input
+                  v-else
+                  type="text"
+                  :value="state.parameterDraft[entry.name] ?? ''"
+                  @input="updateParameter(entry.name, $event.target.value)"
+                />
+
+                <small v-if="entry.definition.description" class="field-desc">
+                  {{ entry.definition.description }}
+                </small>
+                <small v-if="state.parameterErrors[entry.name]" class="field-error">
+                  {{ state.parameterErrors[entry.name] }}
+                </small>
+              </label>
+            </div>
+
+            <div v-else class="empty-box">
+              该算法无需配置参数
+            </div>
+
+            <div class="form-actions">
+              <button type="button" class="secondary" @click="resetDraft">
+                恢复后端参数
+              </button>
+              <button type="button" @click="validateDraft">
+                校验参数类型
+              </button>
+            </div>
+          </section>
+
+          <section class="detail-panel payload-panel">
+            <div class="section-title">
+              <strong>待提交 JSON</strong>
+              <span>保持原始类型</span>
+            </div>
+            <pre>{{ previewJson }}</pre>
+          </section>
+        </div>
+
+        <div v-else class="empty-state">
+          <strong>{{ loading ? '正在加载算法列表' : '请选择算法' }}</strong>
+          <span>{{ loading ? '正在从后端读取 /api/lb/algorithms 和 /api/lb/current' : '左侧算法来自后端返回，不使用硬编码列表' }}</span>
+        </div>
+      </main>
+    </div>
+  </section>
+</template>
+
+<script>
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import {
+  initialLoadBalancingParameters,
+  useLoadBalancingAlgorithmStore
+} from '@/store/loadBalancingAlgorithmStore'
+
+export default {
+  name: 'AlgorithmManager',
+  setup() {
+    const {
+      state,
+      algorithms,
+      selectedAlgorithm,
+      loading,
+      error,
+      fetchOverview,
+      selectAlgorithm,
+      updateParameterDraft,
+      buildParameters,
+      stopPollingStatus
+    } = useLoadBalancingAlgorithmStore()
+
+    const actionNotice = ref('')
+
+    const parameterEntries = computed(() => (
+      Object.entries(selectedAlgorithm.value?.parameters || {}).map(([name, definition]) => ({
+        name,
+        definition
+      }))
+    ))
+
+    const normalizedPreview = computed(() => {
+      if (!selectedAlgorithm.value) return {}
+
+      try {
+        return buildParameters(selectedAlgorithm.value)
+      } catch (_) {
+        return state.parameterDraft
+      }
+    })
+
+    const previewJson = computed(() => JSON.stringify({
+      algorithm_id: selectedAlgorithm.value?.algorithm_id || '',
+      parameters: normalizedPreview.value
+    }, null, 2))
+
+    const refreshOverview = async () => {
+      actionNotice.value = ''
+      try {
+        await fetchOverview()
+      } catch (_) {
+        // Store 已写入 error，这里避免重复提示。
+      }
+    }
+
+    const updateParameter = (name, value) => {
+      actionNotice.value = ''
+      updateParameterDraft(name, value)
+    }
+
+    const resetDraft = () => {
+      if (!selectedAlgorithm.value) return
+      state.parameterDraft = initialLoadBalancingParameters(selectedAlgorithm.value)
+      state.parameterErrors = {}
+      actionNotice.value = '已恢复后端保存参数和默认参数'
+    }
+
+    const validateDraft = () => {
+      if (!selectedAlgorithm.value) return
+
+      try {
+        buildParameters(selectedAlgorithm.value)
+        actionNotice.value = '参数校验通过，提交时会保持正确 JSON 类型'
+      } catch (err) {
+        actionNotice.value = ''
+      }
+    }
+
+    const readFormValue = (definition, rawValue) => {
+      if (!definition.enum) return rawValue
+      const matched = definition.enum.find((item) => String(item) === rawValue)
+      return matched === undefined ? rawValue : matched
+    }
+
+    const formatParameterValue = (value) => {
+      if (typeof value === 'boolean') return value ? 'true' : 'false'
+      return String(value)
+    }
+
+    const formatParameterMeta = (definition) => {
+      const parts = [definition.type || 'string']
+      if (definition.required) parts.push('必填')
+      if (definition.minimum !== undefined) parts.push(`最小 ${definition.minimum}`)
+      if (definition.maximum !== undefined) parts.push(`最大 ${definition.maximum}`)
+      if (Object.prototype.hasOwnProperty.call(definition, 'default')) {
+        parts.push(`默认 ${formatParameterValue(definition.default)}`)
+      }
+      return parts.join(' / ')
+    }
+
+    onMounted(refreshOverview)
+    onBeforeUnmount(stopPollingStatus)
+
+    return {
+      state,
+      algorithms,
+      selectedAlgorithm,
+      loading,
+      error,
+      actionNotice,
+      parameterEntries,
+      previewJson,
+      refreshOverview,
+      selectAlgorithm,
+      updateParameter,
+      resetDraft,
+      validateDraft,
+      readFormValue,
+      formatParameterValue,
+      formatParameterMeta
+    }
+  }
+}
+</script>
+
+<style scoped>
+.algorithm-manager {
+  min-height: 100vh;
+  padding: 22px;
+  color: #eaffff;
+  background:
+    radial-gradient(circle at 24% 18%, rgba(56, 255, 183, .12), transparent 24%),
+    radial-gradient(circle at 72% 36%, rgba(82, 196, 255, .1), transparent 26%),
+    linear-gradient(135deg, #010309, #03131d 52%, #01050a);
+}
+
+.manager-header,
+.section-title,
+.form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.manager-header {
+  margin-bottom: 14px;
+}
+
+.eyebrow {
+  color: #38ffb7;
+  font-size: 12px;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  margin-top: 5px;
+  font-size: 24px;
+}
+
+h2 {
+  margin-top: 5px;
+  font-size: 19px;
+}
+
+p {
+  margin-top: 10px;
+  color: rgba(226, 255, 251, .68);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  min-height: 34px;
+  padding: 0 12px;
+  color: #041a15;
+  background: #38ffb7;
+  border: 1px solid rgba(56, 255, 183, .78);
+  border-radius: 5px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+button:disabled {
+  cursor: wait;
+  opacity: .55;
+}
+
+button.secondary {
+  color: rgba(226, 255, 251, .82);
+  background: transparent;
+  border-color: rgba(82, 196, 255, .34);
+}
+
+.notice {
+  margin-bottom: 12px;
+  padding: 11px 12px;
+  border-radius: 7px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.notice.error {
+  color: #ffd86b;
+  background: rgba(255, 216, 107, .08);
+  border: 1px solid rgba(255, 216, 107, .32);
+}
+
+.notice.success {
+  color: #bfffe8;
+  background: rgba(56, 255, 183, .08);
+  border: 1px solid rgba(56, 255, 183, .3);
+}
+
+.notice.warning {
+  margin: 0;
+  color: #ffe39a;
+  background: rgba(255, 184, 77, .08);
+  border: 1px solid rgba(255, 184, 77, .34);
+}
+
+.manager-layout {
+  display: grid;
+  grid-template-columns: 310px minmax(0, 1fr);
+  gap: 14px;
+  min-height: calc(100vh - 94px);
+}
+
+.algorithm-list,
+.detail-panel {
+  background: rgba(4, 24, 32, .82);
+  border: 1px solid rgba(82, 196, 255, .24);
+  border-radius: 8px;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .28);
+}
+
+.algorithm-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+
+.section-title {
+  margin-bottom: 4px;
+}
+
+.section-title strong {
+  color: #fff;
+  font-size: 14px;
+}
+
+.section-title span {
+  color: rgba(201, 255, 247, .56);
+  font-size: 11px;
+}
+
+.algorithm-item {
+  min-height: 64px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  color: #eaffff;
+  background: rgba(2, 18, 28, .74);
+  border-color: rgba(82, 196, 255, .22);
+  text-align: left;
+}
+
+.algorithm-item.active,
+.algorithm-item:hover {
+  color: #fff;
+  background: rgba(56, 255, 183, .09);
+  border-color: rgba(56, 255, 183, .52);
+}
+
+.algorithm-item.unavailable {
+  opacity: .74;
+}
+
+.algorithm-main {
+  min-width: 0;
+}
+
+.algorithm-main strong,
+.algorithm-main small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.algorithm-main strong {
+  font-size: 13px;
+}
+
+.algorithm-main small {
+  margin-top: 5px;
+  color: rgba(201, 255, 247, .54);
+  font-size: 11px;
+}
+
+.runtime-badge {
+  padding: 4px 7px;
+  color: #9dffe0;
+  background: rgba(56, 255, 183, .08);
+  border: 1px solid rgba(56, 255, 183, .26);
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.runtime-badge.off {
+  color: #ffcf74;
+  background: rgba(255, 184, 77, .08);
+  border-color: rgba(255, 184, 77, .3);
+}
+
+.algorithm-detail {
+  min-width: 0;
+}
+
+.detail-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.detail-panel {
+  padding: 14px;
+}
+
+.summary-panel {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, .8fr);
+  gap: 16px;
+}
+
+dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+dl div {
+  min-width: 0;
+  padding: 9px;
+  background: rgba(2, 18, 28, .68);
+  border: 1px solid rgba(82, 196, 255, .18);
+  border-radius: 6px;
+}
+
+dt,
+dd {
+  margin: 0;
+}
+
+dt {
+  color: rgba(201, 255, 247, .52);
+  font-size: 11px;
+}
+
+dd {
+  margin-top: 5px;
+  overflow: hidden;
+  color: #fff;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.parameter-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.parameter-field {
+  display: grid;
+  gap: 7px;
+  padding: 11px;
+  background: rgba(2, 18, 28, .62);
+  border: 1px solid rgba(82, 196, 255, .18);
+  border-radius: 7px;
+}
+
+.parameter-field.invalid {
+  border-color: rgba(255, 96, 96, .5);
+}
+
+.field-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.field-head strong {
+  color: #fff;
+  font-size: 13px;
+}
+
+.field-head small,
+.field-desc {
+  color: rgba(201, 255, 247, .54);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.field-error {
+  color: #ff9caf;
+  font-size: 11px;
+}
+
+input,
+select {
+  width: 100%;
+  height: 34px;
+  padding: 0 9px;
+  color: #eaffff;
+  background: rgba(1, 10, 17, .82);
+  border: 1px solid rgba(82, 196, 255, .3);
+  border-radius: 5px;
+  outline: none;
+}
+
+input:focus,
+select:focus {
+  border-color: rgba(56, 255, 183, .72);
+  box-shadow: 0 0 0 2px rgba(56, 255, 183, .08);
+}
+
+.switch-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: rgba(226, 255, 251, .78);
+  font-size: 12px;
+}
+
+.switch-field input {
+  width: 18px;
+  height: 18px;
+  accent-color: #38ffb7;
+}
+
+.switch-field em {
+  font-style: normal;
+}
+
+.form-actions {
+  margin-top: 12px;
+}
+
+.payload-panel pre {
+  max-height: 240px;
+  margin: 10px 0 0;
+  overflow: auto;
+  padding: 12px;
+  color: #c9fff7;
+  background: rgba(1, 10, 17, .88);
+  border: 1px solid rgba(82, 196, 255, .18);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.empty-box,
+.empty-state {
+  padding: 16px;
+  color: rgba(226, 255, 251, .66);
+  background: rgba(2, 18, 28, .62);
+  border: 1px solid rgba(82, 196, 255, .16);
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.empty-state {
+  display: grid;
+  place-items: center;
+  min-height: 360px;
+  text-align: center;
+}
+
+.empty-state strong,
+.empty-state span {
+  display: block;
+}
+
+.empty-state strong {
+  color: #fff;
+  font-size: 18px;
+}
+
+.empty-state span {
+  margin-top: 8px;
+}
+
+@media (max-width: 980px) {
+  .manager-layout,
+  .summary-panel {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
