@@ -87,6 +87,75 @@
             该算法当前不可应用：{{ selectedAlgorithm.runtime_registry_error || 'dispatcher 尚未加载运行时插件' }}
           </section>
 
+          <section class="status-grid">
+            <article class="detail-panel status-panel">
+              <div class="section-title">
+                <strong>下一任务期望配置</strong>
+                <span>desired</span>
+              </div>
+              <dl class="status-list">
+                <div>
+                  <dt>算法 ID</dt>
+                  <dd>{{ desired?.algorithm_id || '-' }}</dd>
+                </div>
+                <div>
+                  <dt>配置版本</dt>
+                  <dd>{{ desired?.revision ?? '-' }}</dd>
+                </div>
+                <div>
+                  <dt>更新时间</dt>
+                  <dd>{{ formatTime(desired?.updated_at) }}</dd>
+                </div>
+                <div>
+                  <dt>更新来源</dt>
+                  <dd>{{ desired?.updated_by || '-' }}</dd>
+                </div>
+              </dl>
+              <pre>{{ formatJson(desired?.parameters || {}) }}</pre>
+            </article>
+
+            <article class="detail-panel status-panel">
+              <div class="section-title">
+                <strong>最近真实执行状态</strong>
+                <span>runtime</span>
+              </div>
+              <div class="state-line">
+                <span class="state-badge" :class="runtimeStateClass">
+                  {{ formatExecutionState(runtime?.state) }}
+                </span>
+                <small>{{ revisionMatchText }}</small>
+              </div>
+              <dl class="status-list">
+                <div>
+                  <dt>执行 ID</dt>
+                  <dd>{{ runtime?.execution_id || '-' }}</dd>
+                </div>
+                <div>
+                  <dt>任务 ID</dt>
+                  <dd>{{ runtime?.job_id || '-' }}</dd>
+                </div>
+                <div>
+                  <dt>配置版本</dt>
+                  <dd>{{ runtime?.config_revision ?? '-' }}</dd>
+                </div>
+                <div>
+                  <dt>阶段</dt>
+                  <dd>{{ runtime?.phase || '-' }}</dd>
+                </div>
+              </dl>
+              <div v-if="runtime?.fallback_used || runtime?.state === 'fallback_succeeded'" class="fallback-box">
+                <strong>回退执行</strong>
+                <span>请求算法：{{ runtime?.requested_algorithm_id || '-' }}</span>
+                <span>实际算法：{{ runtime?.effective_algorithm_id || '-' }}</span>
+                <span>回退原因：{{ runtime?.fallback_reason || '后端未返回原因' }}</span>
+              </div>
+              <div v-if="runtime?.state === 'failed'" class="fallback-box failed">
+                <strong>失败原因</strong>
+                <span>{{ runtime?.error || runtime?.fallback_error || '负载均衡调度失败' }}</span>
+              </div>
+            </article>
+          </section>
+
           <section class="detail-panel parameter-panel">
             <div class="section-title">
               <strong>动态参数</strong>
@@ -176,6 +245,29 @@
               <button type="button" @click="validateDraft">
                 校验参数类型
               </button>
+              <button
+                type="button"
+                class="secondary"
+                :disabled="state.loadingStatus"
+                @click="refreshRuntime"
+              >
+                {{ state.loadingStatus ? '刷新中...' : '刷新状态' }}
+              </button>
+              <button
+                type="button"
+                :disabled="state.saving || selectedAlgorithm.runtime_available === false"
+                @click="applySelectedAlgorithm"
+              >
+                {{ state.saving ? '保存中...' : '应用到下一任务' }}
+              </button>
+              <button
+                type="button"
+                class="secondary"
+                :disabled="!waitableRevision || state.polling"
+                @click="waitForAppliedRevision"
+              >
+                {{ state.polling ? '等待中...' : '等待本次配置状态' }}
+              </button>
             </div>
           </section>
 
@@ -211,12 +303,17 @@ export default {
       state,
       algorithms,
       selectedAlgorithm,
+      desired,
+      runtime,
       loading,
       error,
       fetchOverview,
+      fetchExecutionStatus,
       selectAlgorithm,
       updateParameterDraft,
       buildParameters,
+      switchSelectedAlgorithm,
+      waitForRevision,
       stopPollingStatus
     } = useLoadBalancingAlgorithmStore()
 
@@ -243,6 +340,22 @@ export default {
       algorithm_id: selectedAlgorithm.value?.algorithm_id || '',
       parameters: normalizedPreview.value
     }, null, 2))
+
+    const waitableRevision = computed(() => (
+      state.lastAppliedRevision || desired.value?.revision || null
+    ))
+
+    const runtimeStateClass = computed(() => runtime.value?.state || 'idle')
+
+    const revisionMatchText = computed(() => {
+      if (!runtime.value?.config_revision || !desired.value?.revision) {
+        return '尚无可匹配的配置版本'
+      }
+
+      return runtime.value.config_revision === desired.value.revision
+        ? '状态属于当前期望配置'
+        : '状态来自旧配置，不能当作本次结果'
+    })
 
     const refreshOverview = async () => {
       actionNotice.value = ''
@@ -276,6 +389,39 @@ export default {
       }
     }
 
+    const applySelectedAlgorithm = async () => {
+      actionNotice.value = ''
+      try {
+        const data = await switchSelectedAlgorithm()
+        actionNotice.value = data?.message || '已保存，从下一任务开始生效'
+      } catch (err) {
+        state.error = err?.message || '应用负载均衡算法失败'
+      }
+    }
+
+    const refreshRuntime = async () => {
+      actionNotice.value = ''
+      try {
+        await fetchExecutionStatus()
+      } catch (_) {
+        // Store 已写入 error，这里避免重复提示。
+      }
+    }
+
+    const waitForAppliedRevision = async () => {
+      if (!waitableRevision.value) return
+
+      actionNotice.value = ''
+      try {
+        const status = await waitForRevision(waitableRevision.value)
+        actionNotice.value = status
+          ? `配置版本 ${waitableRevision.value} 已进入终态：${formatExecutionState(status.state)}`
+          : `等待期内没有发现配置版本 ${waitableRevision.value} 的新任务终态`
+      } catch (_) {
+        // Store 已写入 error，这里避免重复提示。
+      }
+    }
+
     const readFormValue = (definition, rawValue) => {
       if (!definition.enum) return rawValue
       const matched = definition.enum.find((item) => String(item) === rawValue)
@@ -298,6 +444,26 @@ export default {
       return parts.join(' / ')
     }
 
+    const formatExecutionState = (stateValue) => {
+      const labels = {
+        idle: '等待任务',
+        running: '调度执行中',
+        succeeded: '调度成功',
+        fallback_succeeded: '已回退并成功',
+        failed: '调度失败'
+      }
+      return labels[stateValue] || stateValue || '等待任务'
+    }
+
+    const formatTime = (value) => {
+      if (!value) return '-'
+      const date = new Date(value)
+      if (Number.isNaN(date.getTime())) return String(value)
+      return date.toLocaleString()
+    }
+
+    const formatJson = (value) => JSON.stringify(value || {}, null, 2)
+
     onMounted(refreshOverview)
     onBeforeUnmount(stopPollingStatus)
 
@@ -305,19 +471,30 @@ export default {
       state,
       algorithms,
       selectedAlgorithm,
+      desired,
+      runtime,
       loading,
       error,
       actionNotice,
       parameterEntries,
       previewJson,
+      waitableRevision,
+      runtimeStateClass,
+      revisionMatchText,
       refreshOverview,
       selectAlgorithm,
       updateParameter,
       resetDraft,
       validateDraft,
+      applySelectedAlgorithm,
+      refreshRuntime,
+      waitForAppliedRevision,
       readFormValue,
       formatParameterValue,
-      formatParameterMeta
+      formatParameterMeta,
+      formatExecutionState,
+      formatTime,
+      formatJson
     }
   }
 }
@@ -662,8 +839,16 @@ select:focus {
 
 .form-actions {
   margin-top: 12px;
+  flex-wrap: wrap;
 }
 
+.status-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.status-panel pre,
 .payload-panel pre {
   max-height: 240px;
   margin: 10px 0 0;
@@ -675,6 +860,86 @@ select:focus {
   border-radius: 6px;
   font-size: 12px;
   line-height: 1.6;
+}
+
+.status-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 10px;
+}
+
+.state-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  padding: 10px;
+  background: rgba(2, 18, 28, .62);
+  border: 1px solid rgba(82, 196, 255, .18);
+  border-radius: 6px;
+}
+
+.state-line small {
+  color: rgba(201, 255, 247, .58);
+  font-size: 11px;
+  text-align: right;
+}
+
+.state-badge {
+  flex: 0 0 auto;
+  padding: 5px 9px;
+  color: #cfd8e3;
+  background: rgba(148, 163, 184, .12);
+  border: 1px solid rgba(148, 163, 184, .28);
+  border-radius: 999px;
+  font-size: 12px;
+}
+
+.state-badge.running {
+  color: #9be7ff;
+  background: rgba(82, 196, 255, .1);
+  border-color: rgba(82, 196, 255, .34);
+}
+
+.state-badge.succeeded {
+  color: #9dffe0;
+  background: rgba(56, 255, 183, .08);
+  border-color: rgba(56, 255, 183, .3);
+}
+
+.state-badge.fallback_succeeded {
+  color: #ffe39a;
+  background: rgba(255, 184, 77, .08);
+  border-color: rgba(255, 184, 77, .34);
+}
+
+.state-badge.failed {
+  color: #ffb3c0;
+  background: rgba(255, 77, 109, .08);
+  border-color: rgba(255, 77, 109, .34);
+}
+
+.fallback-box {
+  display: grid;
+  gap: 5px;
+  margin-top: 10px;
+  padding: 10px;
+  color: #ffe39a;
+  background: rgba(255, 184, 77, .08);
+  border: 1px solid rgba(255, 184, 77, .28);
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.fallback-box.failed {
+  color: #ffb3c0;
+  background: rgba(255, 77, 109, .08);
+  border-color: rgba(255, 77, 109, .28);
+}
+
+.fallback-box strong,
+.fallback-box span {
+  display: block;
 }
 
 .empty-box,
@@ -710,7 +975,8 @@ select:focus {
 
 @media (max-width: 980px) {
   .manager-layout,
-  .summary-panel {
+  .summary-panel,
+  .status-grid {
     grid-template-columns: 1fr;
   }
 }

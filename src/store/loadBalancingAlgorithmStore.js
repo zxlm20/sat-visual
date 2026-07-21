@@ -302,9 +302,13 @@ async function saveSelectedAlgorithmConfig() {
 
 async function switchSelectedAlgorithm() {
   const algorithm = selectedAlgorithm.value
-  if (!algorithm) throw new Error('请选择负载均衡算法')
+  if (!algorithm) {
+    state.error = '请选择负载均衡算法'
+    throw new Error(state.error)
+  }
   if (algorithm.runtime_available === false) {
-    throw new Error(algorithm.runtime_registry_error || '该算法尚未由 dispatcher 加载，不能应用')
+    state.error = algorithm.runtime_registry_error || '该算法尚未由 dispatcher 加载，不能应用'
+    throw new Error(state.error)
   }
 
   state.saving = true
