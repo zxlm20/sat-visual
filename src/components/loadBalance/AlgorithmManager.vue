@@ -640,13 +640,19 @@ export default {
 
 <style scoped>
 .algorithm-manager {
-  min-height: 100vh;
+  box-sizing: border-box;
+  height: 100vh;
+  overflow-y: auto;
+  overflow-x: hidden;
   padding: 22px;
   color: #eaffff;
   background:
     radial-gradient(circle at 24% 18%, rgba(56, 255, 183, .12), transparent 24%),
     radial-gradient(circle at 72% 36%, rgba(82, 196, 255, .1), transparent 26%),
     linear-gradient(135deg, #010309, #03131d 52%, #01050a);
+  scrollbar-color: rgba(82, 196, 255, .48) rgba(1, 10, 17, .72);
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
 }
 
 .manager-header,
