@@ -11,6 +11,7 @@
     </header>
 
     <div v-if="error" class="notice error" role="alert">
+      <strong v-if="state.errorStatus">HTTP {{ state.errorStatus }}</strong>
       {{ error }}
     </div>
 
@@ -515,9 +516,9 @@ export default {
       actionNotice.value = ''
       try {
         const data = await switchSelectedAlgorithm()
-        actionNotice.value = data?.message || '已保存，从下一任务开始生效'
+        actionNotice.value = state.actionMessage || data?.message || '已保存，从下一任务开始生效'
       } catch (err) {
-        state.error = err?.message || '应用负载均衡算法失败'
+        if (!state.error) state.error = err?.message || '应用负载均衡算法失败'
       }
     }
 
@@ -743,6 +744,10 @@ button.secondary {
   color: #ffe39a;
   background: rgba(255, 184, 77, .08);
   border: 1px solid rgba(255, 184, 77, .34);
+}
+
+.notice strong {
+  margin-right: 8px;
 }
 
 .manager-layout {

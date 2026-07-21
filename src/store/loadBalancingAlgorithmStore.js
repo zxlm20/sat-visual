@@ -6,6 +6,7 @@ import {
   getLoadBalancingApiErrorMessage,
   getLoadBalancingExecutionStatus,
   isAbortError,
+  isRequestTimeoutError,
   saveLoadBalancingAlgorithmConfig,
   switchLoadBalancingAlgorithm
 } from '@/api/loadBalancingAlgorithmApi'
@@ -27,6 +28,7 @@ const state = reactive({
   saving: false,
   polling: false,
   error: '',
+  errorStatus: null,
   actionMessage: '',
   lastAppliedRevision: null,
   lastMatchedStatus: null,
@@ -42,6 +44,48 @@ function findAlgorithm(algorithmId) {
 function setError(error, fallbackMessage) {
   if (isAbortError(error)) return
   state.error = getLoadBalancingApiErrorMessage(error) || fallbackMessage
+  state.errorStatus = error?.status || null
+}
+
+function resetError() {
+  state.error = ''
+  state.errorStatus = null
+}
+
+function getFieldNameFromLocation(location = []) {
+  const path = Array.isArray(location) ? location.map((item) => String(item)) : []
+  const parameterIndex = path.findIndex((item) => item === 'parameters')
+  if (parameterIndex >= 0 && path[parameterIndex + 1]) {
+    return path[parameterIndex + 1]
+  }
+
+  const last = path[path.length - 1]
+  return last && last !== 'body' ? last : ''
+}
+
+function extractParameterErrors(error) {
+  const detail = error?.data?.detail
+  if (!Array.isArray(detail)) return {}
+
+  return detail.reduce((result, item) => {
+    const fieldName = getFieldNameFromLocation(item?.loc)
+    if (fieldName) {
+      result[fieldName] = item?.msg || item?.message || `${fieldName} 参数不合法`
+    }
+    return result
+  }, {})
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map((item) => stableStringify(item)).join(',')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+function parametersMatch(left = {}, right = {}) {
+  return stableStringify(left || {}) === stableStringify(right || {})
 }
 
 export function initialLoadBalancingParameters(algorithm) {
@@ -170,7 +214,7 @@ function delay(ms, signal) {
 
 async function fetchAlgorithms(options = {}) {
   state.loadingAlgorithms = true
-  state.error = ''
+  resetError()
 
   try {
     const data = await getLoadBalancingAlgorithms(options)
@@ -188,7 +232,7 @@ async function fetchAlgorithms(options = {}) {
 
 async function fetchCurrent(options = {}) {
   state.loadingCurrent = true
-  state.error = ''
+  resetError()
 
   try {
     const data = await getCurrentLoadBalancingAlgorithm(options)
@@ -207,6 +251,7 @@ async function fetchCurrent(options = {}) {
 
 async function fetchExecutionStatus(options = {}) {
   state.loadingStatus = true
+  resetError()
 
   try {
     const data = await getLoadBalancingExecutionStatus(options)
@@ -223,6 +268,7 @@ async function fetchExecutionStatus(options = {}) {
 
 async function fetchLatestResult(options = {}) {
   state.loadingResult = true
+  resetError()
 
   try {
     const data = await getLatestLoadBalancingResult(options)
@@ -238,7 +284,7 @@ async function fetchLatestResult(options = {}) {
 }
 
 async function fetchOverview(options = {}) {
-  state.error = ''
+  resetError()
   const [algorithms, current] = await Promise.all([
     fetchAlgorithms(options),
     fetchCurrent(options)
@@ -250,6 +296,7 @@ function selectAlgorithm(algorithmId) {
   state.selectedAlgorithmId = algorithmId
   state.parameterErrors = {}
   state.actionMessage = ''
+  resetError()
 
   const algorithm = findAlgorithm(algorithmId)
   state.parameterDraft = algorithm ? initialLoadBalancingParameters(algorithm) : {}
@@ -264,6 +311,7 @@ function updateParameterDraft(name, value) {
     ...state.parameterErrors,
     [name]: ''
   }
+  if (state.errorStatus === 422) resetError()
 }
 
 function buildParameters(algorithm = selectedAlgorithm.value) {
@@ -283,7 +331,7 @@ async function saveSelectedAlgorithmConfig() {
   if (!algorithm) throw new Error('请选择负载均衡算法')
 
   state.saving = true
-  state.error = ''
+  resetError()
   state.actionMessage = ''
 
   try {
@@ -293,6 +341,9 @@ async function saveSelectedAlgorithmConfig() {
     await fetchAlgorithms()
     return data
   } catch (error) {
+    if (error?.status === 422) {
+      state.parameterErrors = extractParameterErrors(error)
+    }
     setError(error, '保存算法参数失败')
     throw error
   } finally {
@@ -304,25 +355,49 @@ async function switchSelectedAlgorithm() {
   const algorithm = selectedAlgorithm.value
   if (!algorithm) {
     state.error = '请选择负载均衡算法'
+    state.errorStatus = null
     throw new Error(state.error)
   }
   if (algorithm.runtime_available === false) {
     state.error = algorithm.runtime_registry_error || '该算法尚未由 dispatcher 加载，不能应用'
+    state.errorStatus = 409
     throw new Error(state.error)
   }
 
   state.saving = true
-  state.error = ''
+  resetError()
   state.actionMessage = ''
 
+  let parameters = {}
+
   try {
-    const parameters = buildParameters(algorithm)
+    parameters = buildParameters(algorithm)
     const data = await switchLoadBalancingAlgorithm(algorithm.algorithm_id, parameters)
     state.lastAppliedRevision = data?.revision ?? null
     state.actionMessage = data?.message || '已保存，从下一任务开始生效'
     await Promise.all([fetchAlgorithms(), fetchCurrent()])
     return data
   } catch (error) {
+    if (error?.status === 422) {
+      state.parameterErrors = extractParameterErrors(error)
+    }
+
+    if (isRequestTimeoutError(error)) {
+      try {
+        const current = await fetchCurrent()
+        if (
+          current?.desired?.algorithm_id === algorithm.algorithm_id &&
+          parametersMatch(current?.desired?.parameters, parameters)
+        ) {
+          state.lastAppliedRevision = current.desired.revision ?? null
+          state.actionMessage = '切换请求超时，但当前配置已确认保存，从下一任务开始生效'
+          return current
+        }
+      } catch (_) {
+        // 保留原始超时错误，避免用对账失败掩盖切换结果。
+      }
+    }
+
     setError(error, '切换负载均衡算法失败')
     throw error
   } finally {
@@ -347,7 +422,7 @@ async function waitForRevision(revision, options = {}) {
   const deadline = Date.now() + timeoutMs
 
   state.polling = true
-  state.error = ''
+  resetError()
   state.lastMatchedStatus = null
 
   try {

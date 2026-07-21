@@ -29,12 +29,24 @@ export function getLoadBalancingApiErrorMessage(error) {
 
   if (error.name === 'AbortError') return '请求已取消'
   if (error.name === 'RequestTimeoutError') return error.message
+  if (error.name === 'TypeError' && !error.status) {
+    return '无法连接负载均衡服务，请检查网络或接口地址'
+  }
+
+  if (error.status === 404) return error.message || '算法不存在，请刷新算法列表后重试'
+  if (error.status === 409) return error.message || 'dispatcher 尚未加载该算法，不能应用'
+  if (error.status === 422) return error.message || '参数类型、范围、枚举或必填项不合法'
+  if (error.status >= 500) return error.message || '负载均衡服务异常，请稍后重试'
 
   return error.message || '未知错误'
 }
 
 export function isAbortError(error) {
   return error?.name === 'AbortError'
+}
+
+export function isRequestTimeoutError(error) {
+  return error?.name === 'RequestTimeoutError'
 }
 
 function createTimeoutError(path, timeoutMs) {
