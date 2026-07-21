@@ -278,6 +278,114 @@
             </div>
             <pre>{{ previewJson }}</pre>
           </section>
+
+          <section class="detail-panel result-panel">
+            <div class="section-title">
+              <strong>最近有效调度结果</strong>
+              <button
+                type="button"
+                class="secondary"
+                :disabled="state.loadingResult"
+                @click="refreshLatestResult"
+              >
+                {{ state.loadingResult ? '刷新中...' : '刷新结果' }}
+              </button>
+            </div>
+
+            <div v-if="latestResult && latestResult.available" class="result-content">
+              <dl class="status-list result-meta">
+                <div>
+                  <dt>执行 ID</dt>
+                  <dd>{{ latestResult.execution_id || '-' }}</dd>
+                </div>
+                <div>
+                  <dt>任务 ID</dt>
+                  <dd>{{ latestResult.job_id || '-' }}</dd>
+                </div>
+                <div>
+                  <dt>请求算法</dt>
+                  <dd>{{ latestResult.requested_algorithm_id || '-' }}</dd>
+                </div>
+                <div>
+                  <dt>实际算法</dt>
+                  <dd>{{ latestResult.effective_algorithm_id || '-' }}</dd>
+                </div>
+                <div>
+                  <dt>配置版本</dt>
+                  <dd>{{ latestResult.config_revision ?? '-' }}</dd>
+                </div>
+                <div>
+                  <dt>创建时间</dt>
+                  <dd>{{ formatTime(latestResult.created_at) }}</dd>
+                </div>
+              </dl>
+
+              <div v-if="latestResult.fallback_used" class="fallback-box">
+                <strong>最近结果发生回退</strong>
+                <span>回退原因：{{ latestResult.fallback_reason || '后端未返回原因' }}</span>
+              </div>
+
+              <div class="result-grid">
+                <article>
+                  <div class="section-title compact-title">
+                    <strong>节点任务数量</strong>
+                    <span>{{ assignedCountEntries.length }} 个节点</span>
+                  </div>
+                  <div v-if="assignedCountEntries.length" class="assigned-count-list">
+                    <span
+                      v-for="entry in assignedCountEntries"
+                      :key="entry.nodeId"
+                    >
+                      <b>{{ entry.nodeId }}</b>
+                      <em>{{ entry.count }}</em>
+                    </span>
+                  </div>
+                  <div v-else class="empty-box">
+                    后端未返回 assigned_count 统计
+                  </div>
+                </article>
+
+                <article>
+                  <div class="section-title compact-title">
+                    <strong>执行参数</strong>
+                    <span>parameters</span>
+                  </div>
+                  <pre>{{ formatJson(latestResult.parameters || {}) }}</pre>
+                </article>
+              </div>
+
+              <div class="assignment-table">
+                <div class="assignment-row head">
+                  <span>任务块</span>
+                  <span>节点</span>
+                  <span>顺序</span>
+                  <span>决策信息</span>
+                </div>
+                <div
+                  v-for="assignment in latestAssignments"
+                  :key="`${assignment.tile_id}-${assignment.node_id}-${assignment.order}`"
+                  class="assignment-row"
+                >
+                  <span>{{ assignment.tile_id || '-' }}</span>
+                  <span>{{ assignment.node_id || '-' }}</span>
+                  <span>{{ assignment.order ?? '-' }}</span>
+                  <span>{{ formatCompactJson(assignment.decision || {}) }}</span>
+                </div>
+              </div>
+
+              <div v-if="latestAssignments.length === 0" class="empty-box">
+                最近结果没有 assignment 明细
+              </div>
+            </div>
+
+            <div v-else-if="latestResult && latestResult.available === false" class="empty-box">
+              后端暂无最近有效调度结果
+            </div>
+
+            <div v-else class="empty-box">
+              尚未查询最近有效调度结果
+            </div>
+          </section>
         </div>
 
         <div v-else class="empty-state">
@@ -305,10 +413,14 @@ export default {
       selectedAlgorithm,
       desired,
       runtime,
+      latestResult,
+      latestAssignments,
+      latestAssignedCount,
       loading,
       error,
       fetchOverview,
       fetchExecutionStatus,
+      fetchLatestResult,
       selectAlgorithm,
       updateParameterDraft,
       buildParameters,
@@ -357,10 +469,20 @@ export default {
         : '状态来自旧配置，不能当作本次结果'
     })
 
+    const assignedCountEntries = computed(() => (
+      Object.entries(latestAssignedCount.value || {}).map(([nodeId, count]) => ({
+        nodeId,
+        count
+      }))
+    ))
+
     const refreshOverview = async () => {
       actionNotice.value = ''
       try {
-        await fetchOverview()
+        await Promise.all([
+          fetchOverview(),
+          fetchLatestResult()
+        ])
       } catch (_) {
         // Store 已写入 error，这里避免重复提示。
       }
@@ -403,6 +525,15 @@ export default {
       actionNotice.value = ''
       try {
         await fetchExecutionStatus()
+      } catch (_) {
+        // Store 已写入 error，这里避免重复提示。
+      }
+    }
+
+    const refreshLatestResult = async () => {
+      actionNotice.value = ''
+      try {
+        await fetchLatestResult()
       } catch (_) {
         // Store 已写入 error，这里避免重复提示。
       }
@@ -463,6 +594,7 @@ export default {
     }
 
     const formatJson = (value) => JSON.stringify(value || {}, null, 2)
+    const formatCompactJson = (value) => JSON.stringify(value || {})
 
     onMounted(refreshOverview)
     onBeforeUnmount(stopPollingStatus)
@@ -473,6 +605,8 @@ export default {
       selectedAlgorithm,
       desired,
       runtime,
+      latestResult,
+      latestAssignments,
       loading,
       error,
       actionNotice,
@@ -481,6 +615,7 @@ export default {
       waitableRevision,
       runtimeStateClass,
       revisionMatchText,
+      assignedCountEntries,
       refreshOverview,
       selectAlgorithm,
       updateParameter,
@@ -488,13 +623,15 @@ export default {
       validateDraft,
       applySelectedAlgorithm,
       refreshRuntime,
+      refreshLatestResult,
       waitForAppliedRevision,
       readFormValue,
       formatParameterValue,
       formatParameterMeta,
       formatExecutionState,
       formatTime,
-      formatJson
+      formatJson,
+      formatCompactJson
     }
   }
 }
@@ -942,6 +1079,101 @@ select:focus {
   display: block;
 }
 
+.result-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.result-content {
+  display: grid;
+  gap: 12px;
+}
+
+.result-grid {
+  display: grid;
+  grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+  gap: 12px;
+}
+
+.result-grid article {
+  min-width: 0;
+  padding: 11px;
+  background: rgba(2, 18, 28, .62);
+  border: 1px solid rgba(82, 196, 255, .18);
+  border-radius: 7px;
+}
+
+.compact-title {
+  margin-bottom: 9px;
+}
+
+.assigned-count-list {
+  display: grid;
+  gap: 7px;
+}
+
+.assigned-count-list span {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 9px;
+  color: rgba(226, 255, 251, .78);
+  background: rgba(1, 10, 17, .55);
+  border: 1px solid rgba(82, 196, 255, .14);
+  border-radius: 5px;
+}
+
+.assigned-count-list b,
+.assigned-count-list em {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assigned-count-list b {
+  color: #fff;
+  font-size: 12px;
+}
+
+.assigned-count-list em {
+  min-width: 34px;
+  color: #38ffb7;
+  font-style: normal;
+  font-weight: 700;
+  text-align: right;
+}
+
+.assignment-table {
+  overflow: hidden;
+  border: 1px solid rgba(82, 196, 255, .2);
+  border-radius: 7px;
+}
+
+.assignment-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 1fr) minmax(90px, .75fr) 62px minmax(180px, 1.4fr);
+  gap: 8px;
+  padding: 9px 10px;
+  color: rgba(226, 255, 251, .76);
+  border-top: 1px solid rgba(82, 196, 255, .12);
+  font-size: 12px;
+}
+
+.assignment-row.head {
+  color: #38ffb7;
+  background: rgba(56, 255, 183, .08);
+  border-top: 0;
+  font-weight: 700;
+}
+
+.assignment-row span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .empty-box,
 .empty-state {
   padding: 16px;
@@ -976,8 +1208,17 @@ select:focus {
 @media (max-width: 980px) {
   .manager-layout,
   .summary-panel,
-  .status-grid {
+  .status-grid,
+  .result-grid {
     grid-template-columns: 1fr;
+  }
+
+  .assignment-row {
+    grid-template-columns: minmax(0, 1fr) minmax(80px, .6fr) 48px;
+  }
+
+  .assignment-row span:last-child {
+    grid-column: 1 / -1;
   }
 }
 </style>
