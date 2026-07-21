@@ -47,12 +47,13 @@
 
     <!-- ========== 错误提示横幅 ========== -->
     <div
-      v-if="store.state.saveError"
+      v-if="store.state.saveError || store.state.error"
       class="cm-error-banner"
       role="alert"
     >
       <span class="err-icon">⚠️</span>
-      <span>{{ store.state.saveError }}</span>
+      <span>{{ store.state.saveError || store.state.error }}</span>
+      <span v-if="store.state.saveError && store.state.error" class="err-note">（查询异常也可能影响操作结果）</span>
       <button class="err-close" @click="dismissError">&times;</button>
     </div>
 
@@ -486,13 +487,21 @@ export default {
       try {
         if (isNewGroup.value) {
           // 新建 — 不传 constellation_id，后端自动生成
-          const payload = {
+          await store.saveGroup({
             constellation_name: editForm.constellation_name.trim(),
             color: editForm.color,
             description: editForm.description.trim(),
             members: editForm.members
+          })
+          // 新建成功后从刷新后的列表中查找并选中
+          const created = store.state.groups.find(
+            g => g.constellation_name === editForm.constellation_name.trim()
+          )
+          if (created) {
+            selectGroup(created)
+          } else {
+            cancelEdit()
           }
-          await store.saveGroup(payload)
         } else {
           // 修改
           await store.saveGroup({
@@ -502,11 +511,16 @@ export default {
             description: editForm.description.trim(),
             members: editForm.members
           })
+          // 修改后保持选中，从刷新后的数据中查找
+          const updated = store.state.groups.find(
+            g => g.constellation_id === editForm.constellation_id
+          )
+          if (updated) {
+            selectGroup(updated)
+          } else {
+            cancelEdit()
+          }
         }
-        // 保存成功后更新选中状态
-        editingGroup.value = false
-        isNewGroup.value = false
-        selectedId.value = null
       } catch (_) {
         // 错误已由 store.state.saveError 展示
       }

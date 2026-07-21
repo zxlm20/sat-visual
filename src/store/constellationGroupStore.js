@@ -46,6 +46,31 @@ const state = reactive({
 // ===========================================================================
 
 /**
+ * 将异常转换为用户友好的提示文案
+ *
+ * 处理几种常见场景：
+ * - 网络不可达（Failed to fetch）→ "无法连接后端服务"
+ * - 请求超时（RequestTimeoutError）→ 使用已生成的可读超时文案
+ * - 后端业务错误（400 等）→ 使用后端返回的 detail
+ * - 其他 → 使用 error.message 或兜底文案
+ *
+ * @param {unknown} error - 捕获的异常
+ * @param {string} fallback - 兜底文案
+ * @returns {string}
+ */
+function getFriendlyError(error, fallback) {
+  if (!error) return fallback
+  // 请求超时 — 已有的友好文案如"请求超时（8 秒）：/api/..."
+  if (error.name === 'RequestTimeoutError') return error.message
+  // 网络不可达 — TypeError: Failed to fetch
+  if (error.message === 'Failed to fetch' || error.name === 'TypeError') {
+    return '无法连接后端服务，请检查网络后重试'
+  }
+  // 后端返回的业务错误 detail、HTTP 状态码描述等
+  return error.message || fallback
+}
+
+/**
  * 从 fetchConstellationGroups 响应中更新本地状态
  * @param {object} data - 接口返回数据
  */
@@ -88,7 +113,7 @@ async function fetchGroups() {
 
     return data
   } catch (error) {
-    state.error = error?.message || '查询星座分组失败'
+    state.error = getFriendlyError(error, '查询星座分组失败')
     throw error
   } finally {
     state.loading = false
@@ -113,7 +138,7 @@ async function saveGroup(group) {
     await fetchGroups()
     return result
   } catch (error) {
-    state.saveError = error?.message || '保存星座失败'
+    state.saveError = getFriendlyError(error, '保存星座失败')
     throw error
   } finally {
     state.saving = false
@@ -135,7 +160,7 @@ async function saveAllGroups(groups) {
     await fetchGroups()
     return result
   } catch (error) {
-    state.saveError = error?.message || '保存全部星座配置失败'
+    state.saveError = getFriendlyError(error, '保存全部星座配置失败')
     throw error
   } finally {
     state.saving = false
@@ -158,7 +183,7 @@ async function moveMember(nodeId, constellationId) {
     await fetchGroups()
     return result
   } catch (error) {
-    state.saveError = error?.message || '移动卫星失败'
+    state.saveError = getFriendlyError(error, '移动卫星失败')
     throw error
   } finally {
     state.saving = false
@@ -180,7 +205,7 @@ async function removeMember(nodeId) {
     await fetchGroups()
     return result
   } catch (error) {
-    state.saveError = error?.message || '移除卫星失败'
+    state.saveError = getFriendlyError(error, '移除卫星失败')
     throw error
   } finally {
     state.saving = false
@@ -206,7 +231,7 @@ async function deleteGroup(constellationId) {
     await fetchGroups()
     return result
   } catch (error) {
-    state.saveError = error?.message || '删除星座失败'
+    state.saveError = getFriendlyError(error, '删除星座失败')
     throw error
   } finally {
     state.saving = false
@@ -228,7 +253,7 @@ async function resetDefaults() {
     await fetchGroups()
     return result
   } catch (error) {
-    state.saveError = error?.message || '恢复默认星座失败'
+    state.saveError = getFriendlyError(error, '恢复默认星座失败')
     throw error
   } finally {
     state.saving = false
