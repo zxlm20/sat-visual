@@ -6,6 +6,11 @@ const routes = [
     path: '/',
     name: 'SatelliteTask',
     component: SatelliteTask
+  },
+  {
+    path: '/dev/dynamic-topology',
+    name: 'DynamicTopologyDemo',
+    component: () => import('../views/dev/DynamicTopologyDemo.vue')
   }
 ]
 
