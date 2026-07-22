@@ -452,6 +452,132 @@
           </div>
         </section>
 
+        <section class="detail-panel business-flow-panel">
+          <div class="section-title">
+            <strong>当前推理业务流</strong>
+            <span>GET /api/links/business-flows</span>
+          </div>
+
+          <div v-if="state.businessFlowError" class="notice warning" role="alert">
+            {{ state.businessFlowError }}
+          </div>
+
+          <div class="business-toolbar">
+            <span>
+              数据来源
+              <strong>{{ businessFlowSource || '-' }}</strong>
+            </span>
+            <button
+              type="button"
+              :disabled="state.loadingBusinessFlows"
+              @click="queryBusinessFlows"
+            >
+              {{ state.loadingBusinessFlows ? '读取中...' : '刷新业务流' }}
+            </button>
+          </div>
+
+          <div v-if="businessFlows.length" class="business-content">
+            <div class="business-overview">
+              <article>
+                <span>业务流数量</span>
+                <strong>{{ businessFlows.length }}</strong>
+              </article>
+              <article>
+                <span>tile 总数</span>
+                <strong>{{ businessFlowSummary.tileCount }}</strong>
+              </article>
+              <article>
+                <span>流量总量</span>
+                <strong>{{ formatBytes(businessFlowSummary.trafficBytes) }}</strong>
+              </article>
+              <article>
+                <span>当前速率</span>
+                <strong>{{ formatMbps(businessFlowSummary.currentRateMbps) }}</strong>
+              </article>
+            </div>
+
+            <div class="business-flow-list">
+              <article
+                v-for="flow in businessFlows"
+                :key="flow.flow_id || flow.job_id"
+                class="business-flow-card"
+              >
+                <div class="flow-card-head">
+                  <div>
+                    <strong>{{ flow.flow_id || '-' }}</strong>
+                    <span>{{ flow.job_id || '-' }}</span>
+                  </div>
+                  <b>{{ flow.status || '-' }}</b>
+                </div>
+
+                <div class="flow-fields">
+                  <span>
+                    类型
+                    <strong>{{ flow.business_type || '-' }}</strong>
+                  </span>
+                  <span>
+                    目的物理节点
+                    <strong>{{ flow.physical_destination || '-' }}</strong>
+                  </span>
+                  <span>
+                    tile
+                    <strong>{{ flow.tile_count ?? '-' }}</strong>
+                  </span>
+                  <span>
+                    流量
+                    <strong>{{ formatBytes(flow.traffic_bytes) }}</strong>
+                  </span>
+                  <span>
+                    速率
+                    <strong>{{ formatMbps(flow.current_rate_mbps) }}</strong>
+                  </span>
+                  <span>
+                    分配代价
+                    <strong>{{ formatNumber(flow.assigned_cost) }}</strong>
+                  </span>
+                </div>
+
+                <div class="flow-path">
+                  <strong>节点路径</strong>
+                  <div>
+                    <span
+                      v-for="node in normalizeList(flow.path_nodes)"
+                      :key="`${flow.flow_id || flow.job_id}-node-${node}`"
+                    >
+                      {{ node }}
+                    </span>
+                  </div>
+                </div>
+
+                <div class="flow-path link-path">
+                  <strong>链路 ID</strong>
+                  <div>
+                    <span
+                      v-for="linkId in normalizeList(flow.path_link_ids)"
+                      :key="`${flow.flow_id || flow.job_id}-link-${linkId}`"
+                    >
+                      {{ linkId }}
+                    </span>
+                  </div>
+                </div>
+
+                <details class="flow-json">
+                  <summary>查看业务流 JSON</summary>
+                  <pre>{{ formatJson(flow) }}</pre>
+                </details>
+              </article>
+            </div>
+          </div>
+
+          <div v-else-if="state.loadingBusinessFlows" class="empty-box">
+            正在读取最新推理业务流...
+          </div>
+
+          <div v-else class="empty-box">
+            当前没有最近推理业务流，或后端暂未返回 dispatcher 最新任务
+          </div>
+        </section>
+
         <section class="detail-panel link-list-panel">
           <div class="section-title">
             <strong>链路列表</strong>
@@ -602,6 +728,8 @@ export default {
       thresholds,
       historyFrames,
       selectedHistoryFrame,
+      businessFlows,
+      businessFlowSource,
       updateFilters,
       resetFilters,
       updateHistoryFilters,
@@ -613,6 +741,7 @@ export default {
       fetchThresholds,
       saveThresholds,
       fetchHistory,
+      fetchBusinessFlows,
       stopAllRequests
     } = useLinkStateStore()
 
@@ -702,6 +831,18 @@ export default {
         : historyFrames.value.slice(0, 24)
     ))
 
+    const businessFlowSummary = computed(() => (
+      businessFlows.value.reduce((summaryValue, flow) => ({
+        tileCount: summaryValue.tileCount + (Number(flow.tile_count) || 0),
+        trafficBytes: summaryValue.trafficBytes + (Number(flow.traffic_bytes) || 0),
+        currentRateMbps: summaryValue.currentRateMbps + (Number(flow.current_rate_mbps) || 0)
+      }), {
+        tileCount: 0,
+        trafficBytes: 0,
+        currentRateMbps: 0
+      })
+    ))
+
     const refreshStatus = async () => {
       try {
         await fetchStatus()
@@ -730,6 +871,14 @@ export default {
     const queryHistory = async () => {
       try {
         await fetchHistory()
+      } catch (_) {
+        // Store 已写入错误信息，避免重复提示。
+      }
+    }
+
+    const queryBusinessFlows = async () => {
+      try {
+        await fetchBusinessFlows()
       } catch (_) {
         // Store 已写入错误信息，避免重复提示。
       }
@@ -817,6 +966,14 @@ export default {
     const formatKm = (value) => `${formatNumber(value)} km`
     const formatPercent = (value) => `${formatNumber(value)}%`
 
+    const formatBytes = (value) => {
+      const numberValue = Number(value)
+      if (!Number.isFinite(numberValue)) return '-'
+      if (numberValue >= 1024 * 1024) return `${formatNumber(numberValue / 1024 / 1024)} MiB`
+      if (numberValue >= 1024) return `${formatNumber(numberValue / 1024)} KiB`
+      return `${numberValue.toFixed(0)} B`
+    }
+
     const formatLinkType = (value) => {
       const labels = {
         isl: '动态几何链路 ISL',
@@ -854,11 +1011,16 @@ export default {
       frame?.time_index ?? frame?.timeIndex ?? frame?.time ?? '-'
     )
 
+    const normalizeList = (value) => (
+      Array.isArray(value) ? value.filter(Boolean) : []
+    )
+
     const formatJson = (value) => JSON.stringify(value || {}, null, 2)
 
     onMounted(() => {
       refreshStatus()
       refreshThresholds()
+      queryBusinessFlows()
     })
     onBeforeUnmount(stopAllRequests)
 
@@ -871,16 +1033,20 @@ export default {
       thresholds,
       historyFrames,
       selectedHistoryFrame,
+      businessFlows,
+      businessFlowSource,
       thresholdGroups,
       congestionEntries,
       congestionLevels,
       estimatedHistoryFrameCount,
       selectedHistoryLinks,
       historyFramePreview,
+      businessFlowSummary,
       refreshStatus,
       refreshThresholds,
       saveThresholdDraft,
       queryHistory,
+      queryBusinessFlows,
       resetHistoryAndQuery,
       resetAndRefresh,
       updateFilter,
@@ -897,11 +1063,13 @@ export default {
       formatMs,
       formatKm,
       formatPercent,
+      formatBytes,
       formatLinkType,
       formatCongestion,
       formatBusinessTypes,
       formatTime,
       getFrameTimeIndex,
+      normalizeList,
       formatJson
     }
   }
@@ -1410,6 +1578,189 @@ select:focus {
   cursor: default;
 }
 
+.business-flow-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.business-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  color: rgba(226, 255, 251, .7);
+  background: rgba(2, 18, 28, .62);
+  border: 1px solid rgba(82, 196, 255, .18);
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.business-toolbar strong {
+  margin-left: 4px;
+  color: #fff;
+}
+
+.business-content {
+  display: grid;
+  gap: 10px;
+}
+
+.business-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.business-overview article,
+.business-flow-card {
+  min-width: 0;
+  background: rgba(2, 18, 28, .62);
+  border: 1px solid rgba(82, 196, 255, .18);
+  border-radius: 7px;
+}
+
+.business-overview article {
+  padding: 10px;
+}
+
+.business-overview span,
+.business-overview strong {
+  display: block;
+}
+
+.business-overview span {
+  color: rgba(201, 255, 247, .54);
+  font-size: 11px;
+}
+
+.business-overview strong {
+  margin-top: 5px;
+  overflow: hidden;
+  color: #fff;
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.business-flow-list {
+  display: grid;
+  gap: 10px;
+}
+
+.business-flow-card {
+  display: grid;
+  gap: 10px;
+  padding: 11px;
+}
+
+.flow-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.flow-card-head div {
+  min-width: 0;
+}
+
+.flow-card-head strong,
+.flow-card-head span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-card-head strong {
+  color: #fff;
+  font-size: 13px;
+}
+
+.flow-card-head span {
+  margin-top: 4px;
+  color: rgba(201, 255, 247, .54);
+  font-size: 11px;
+}
+
+.flow-card-head b {
+  flex: 0 0 auto;
+  padding: 4px 8px;
+  color: #041a15;
+  background: #52c4ff;
+  border-radius: 999px;
+  font-size: 11px;
+}
+
+.flow-fields {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.flow-fields span {
+  min-width: 0;
+  padding: 8px;
+  color: rgba(201, 255, 247, .54);
+  background: rgba(1, 10, 17, .5);
+  border: 1px solid rgba(82, 196, 255, .14);
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.flow-fields strong {
+  display: block;
+  margin-top: 5px;
+  overflow: hidden;
+  color: #fff;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.flow-path {
+  display: grid;
+  gap: 7px;
+}
+
+.flow-path > strong {
+  color: #38ffb7;
+  font-size: 12px;
+}
+
+.flow-path > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.flow-path span {
+  max-width: 100%;
+  overflow: hidden;
+  padding: 5px 8px;
+  color: rgba(226, 255, 251, .82);
+  background: rgba(56, 255, 183, .08);
+  border: 1px solid rgba(56, 255, 183, .22);
+  border-radius: 999px;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.link-path span {
+  background: rgba(82, 196, 255, .08);
+  border-color: rgba(82, 196, 255, .22);
+}
+
+.flow-json {
+  color: rgba(226, 255, 251, .72);
+  font-size: 12px;
+}
+
+.flow-json summary {
+  cursor: pointer;
+}
+
 .link-table {
   margin-top: 10px;
   overflow: hidden;
@@ -1564,7 +1915,9 @@ pre {
   .threshold-groups,
   .level-strip,
   .history-query,
-  .history-overview {
+  .history-overview,
+  .business-overview,
+  .flow-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1576,12 +1929,16 @@ pre {
   .level-strip,
   .history-query,
   .history-overview,
+  .business-overview,
+  .flow-fields,
   dl {
     grid-template-columns: 1fr;
   }
 
   .threshold-toolbar,
-  .history-toolbar {
+  .history-toolbar,
+  .business-toolbar,
+  .flow-card-head {
     align-items: stretch;
     flex-direction: column;
   }
