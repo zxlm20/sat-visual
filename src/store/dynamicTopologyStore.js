@@ -80,7 +80,14 @@ function getFriendlyError(error, fallback) {
   if (error.message === 'Failed to fetch' || error.name === 'TypeError') {
     return '无法连接后端服务，请检查网络后重试'
   }
-  return error.message || fallback
+  const msg = error.message || ''
+  if (/^请求失败：HTTP 4(?:0[1347]|1[0489]|29|3[014]|44|99)/.test(msg)) {
+    return '接口不可用，请确认后端版本是否支持该功能'
+  }
+  if (/^请求失败：HTTP 5/.test(msg)) {
+    return `服务器内部错误，请稍后重试（${msg}）`
+  }
+  return msg || fallback
 }
 
 /**

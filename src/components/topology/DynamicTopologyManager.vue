@@ -97,6 +97,14 @@
           </label>
         </div>
 
+        <!-- 无星座提示 -->
+        <div
+          v-if="store.state.constellationOptions.length <= 1"
+          class="no-constellation-hint"
+        >
+          请先在星座分组管理页面配置星座
+        </div>
+
         <!-- 查询按钮 -->
         <div class="filter-item filter-action">
           <button
@@ -719,7 +727,7 @@
 </template>
 
 <script>
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue'
 import { useDynamicTopologyStore } from '@/store/dynamicTopologyStore'
 
 export default {
@@ -934,6 +942,11 @@ export default {
       await handleQuery()
     })
 
+    // 组件销毁时取消所有进行中的请求
+    onBeforeUnmount(() => {
+      store.cancelRequest()
+    })
+
     return {
       store,
       localConstellationId,
@@ -1083,6 +1096,17 @@ export default {
 
 .filter-action {
   margin-left: auto;
+}
+
+/* 无星座提示 */
+.no-constellation-hint {
+  font-size: 11px;
+  color: #ffb84d;
+  background: rgba(255, 184, 77, 0.06);
+  border: 1px solid rgba(255, 184, 77, 0.12);
+  border-radius: 3px;
+  padding: 4px 10px;
+  white-space: nowrap;
 }
 
 /* ===================== 时间信息 ===================== */
