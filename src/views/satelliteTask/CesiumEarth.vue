@@ -64,7 +64,7 @@
       </label>
       <label v-if="topologyEnabled" class="simulated-toggle">
         <input v-model="includeSimulatedLinks" type="checkbox" />
-        显示演示链路
+        显示演示链路（不含轨道）
       </label>
       <div v-if="topologyEnabled" class="topology-counts">
         <span>真实关系 {{ topologyLinkCounts.real }}</span>
@@ -83,7 +83,7 @@
           <i :style="{ background: meta.color }"></i>{{ meta.label }}
         </span>
       </div>
-      <small v-if="topologyEnabled">粉色发光线和移动光点表示任务流方向；虚线为演示关系</small>
+      <small v-if="topologyEnabled">粉色发光线表示任务流；青/紫虚线是演示关系；绿色和橙色闭合线是卫星轨道</small>
       <em v-if="topologyDisplayError">{{ topologyDisplayError }}</em>
     </div>
 
