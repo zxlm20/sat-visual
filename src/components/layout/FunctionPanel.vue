@@ -4,6 +4,7 @@
     class="function-panel"
     :class="{
       wide: current.id === 'tasks',
+      'balance-wide': current.id === 'balance',
       'topology-full': current.id === 'topology'
     }"
   >
@@ -514,12 +515,38 @@
 
       <div
         v-else-if="current.id === 'balance'"
-        class="module"
+        class="module balance-module"
       >
+        <div class="balance-tabs" role="tablist" aria-label="负载均衡功能">
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="balanceView === 'algorithm'"
+            :class="{ active: balanceView === 'algorithm' }"
+            @click="selectBalanceView('algorithm')"
+          >
+            <strong>算法调度</strong>
+            <small>选择算法、配置参数并查看调度结果</small>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="balanceView === 'load'"
+            :class="{ active: balanceView === 'load' }"
+            @click="selectBalanceView('load')"
+          >
+            <strong>节点负载</strong>
+            <small>查看资源评分、六档负载和评分权重</small>
+          </button>
+        </div>
+
+        <AlgorithmManager v-if="balanceView === 'algorithm'" compact />
+
+        <template v-else>
         <div class="summary-card">
-          <span>节点负载与调度</span>
+          <span>节点负载评分</span>
           <strong>{{ loadState.nodes.length }} 个实时负载节点</strong>
-          <p>综合 CPU、内存、磁盘、NPU、任务队列和可用性，按六档展示并支持调整评分阈值。</p>
+          <p>这里的“权重”只用于计算节点负载分数，不是任务调度算法参数。系统综合 CPU、内存、磁盘、NPU、任务队列和可用性，按六档展示节点压力。</p>
         </div>
 
         <div class="task-toolbar">
@@ -608,18 +635,7 @@
             <strong>{{ lbState.current?.k8s?.error || '-' }}</strong>
           </div>
         </div>
-
-        <div class="policy-list">
-          <div
-            v-for="policy in lbState.policies"
-            :key="policy.id"
-            class="policy-card"
-          >
-            <span>{{ policy.id }}</span>
-            <strong>{{ policy.name }}</strong>
-            <small>{{ policy.image_hint }}</small>
-          </div>
-        </div>
+        </template>
       </div>
 
       <div
@@ -664,6 +680,7 @@ import { useNodeStore } from '@/store/nodeStore'
 import { useConstellationStore } from '@/store/constellationStore'
 import { useNodeModelStore } from '@/store/nodeModelStore'
 import { useResourceStore } from '@/store/resourceStore'
+import AlgorithmManager from '@/components/loadBalance/AlgorithmManager.vue'
 
 const fallbackContent = {
   constellation: {
@@ -705,6 +722,9 @@ const fallbackContent = {
 
 export default {
   name: 'FunctionPanel',
+  components: {
+    AlgorithmManager
+  },
   emits: ['close', 'node-click', 'node-filter'],
   props: {
     current: {
@@ -743,6 +763,7 @@ export default {
       binding_role: 'edge-worker'
     })
     const operationNotice = reactive({ message: '', type: 'success' })
+    const balanceView = ref('algorithm')
     const canonicalLoadLevelKeys = ['idle', 'smooth', 'normal', 'light', 'medium', 'heavy', 'offline']
     const weightFields = [
       { key: 'cpu_percent', label: 'CPU' },
@@ -939,6 +960,13 @@ export default {
       if (failure) {
         operationNotice.type = 'error'
         operationNotice.message = failure.reason?.message || '刷新负载状态失败'
+      }
+    }
+
+    const selectBalanceView = (view) => {
+      balanceView.value = view
+      if (view === 'load' && !loadState.loading) {
+        refreshLoadModule()
       }
     }
 
@@ -1485,7 +1513,7 @@ export default {
         if (id === 'topology' && topologyState.nodes.length === 0 && !topologyState.loading) {
           loadTopology()
         }
-        if (id === 'balance' && !loadState.loading) {
+        if (id === 'balance' && balanceView.value === 'load' && !loadState.loading) {
           refreshLoadModule()
         }
       },
@@ -1546,6 +1574,8 @@ export default {
       topologyIncludeSimulated,
       topologyTrafficLevels: TOPOLOGY_TRAFFIC_META,
       lbState,
+      balanceView,
+      selectBalanceView,
       fallbackContent,
       manifest,
       scheduling,
@@ -1662,6 +1692,10 @@ export default {
   width: 740px;
 }
 
+.function-panel.balance-wide {
+  width: min(1120px, calc(100vw - 370px));
+}
+
 .function-panel.topology-full {
   top: 20px;
   right: 20px;
@@ -1774,6 +1808,52 @@ h2 {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.balance-tabs {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 5px;
+  background: rgba(1, 12, 20, .72);
+  border: 1px solid rgba(82, 196, 255, .2);
+  border-radius: 8px;
+}
+
+.balance-tabs button {
+  min-width: 0;
+  padding: 10px 12px;
+  color: rgba(226, 255, 251, .7);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.balance-tabs button:hover,
+.balance-tabs button.active {
+  color: #fff;
+  background: linear-gradient(135deg, rgba(56, 255, 183, .13), rgba(82, 196, 255, .08));
+  border-color: rgba(56, 255, 183, .42);
+}
+
+.balance-tabs strong,
+.balance-tabs small {
+  display: block;
+}
+
+.balance-tabs strong {
+  font-size: 13px;
+}
+
+.balance-tabs small {
+  margin-top: 4px;
+  overflow: hidden;
+  color: rgba(201, 255, 247, .54);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .summary-card,

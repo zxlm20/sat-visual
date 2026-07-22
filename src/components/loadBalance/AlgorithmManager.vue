@@ -1,5 +1,5 @@
 <template>
-  <section class="algorithm-manager">
+  <section class="algorithm-manager" :class="{ compact }">
     <header class="manager-header">
       <div>
         <span class="eyebrow">负载均衡算法</span>
@@ -407,6 +407,12 @@ import {
 
 export default {
   name: 'AlgorithmManager',
+  props: {
+    compact: {
+      type: Boolean,
+      default: false
+    }
+  },
   setup() {
     const {
       state,
@@ -653,6 +659,33 @@ export default {
   scrollbar-color: rgba(82, 196, 255, .48) rgba(1, 10, 17, .72);
   scrollbar-width: thin;
   -webkit-overflow-scrolling: touch;
+}
+
+.algorithm-manager.compact {
+  height: auto;
+  min-height: 0;
+  overflow: visible;
+  padding: 0;
+  background: transparent;
+}
+
+.algorithm-manager.compact .manager-header {
+  margin: 2px 0 12px;
+  padding: 0 2px;
+}
+
+.algorithm-manager.compact .manager-header h1 {
+  font-size: 20px;
+}
+
+.algorithm-manager.compact .manager-layout {
+  grid-template-columns: 238px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.algorithm-manager.compact .algorithm-list,
+.algorithm-manager.compact .detail-panel {
+  box-shadow: none;
 }
 
 .manager-header,
@@ -1230,6 +1263,15 @@ select:focus {
 
   .assignment-row span:last-child {
     grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 1180px) {
+  .algorithm-manager.compact .manager-layout,
+  .algorithm-manager.compact .summary-panel,
+  .algorithm-manager.compact .status-grid,
+  .algorithm-manager.compact .result-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
