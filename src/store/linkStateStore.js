@@ -228,6 +228,13 @@ function resetFilters() {
   state.filters = { ...DEFAULT_FILTERS }
 }
 
+function selectLink(linkId) {
+  state.selectedLinkId = String(linkId || '')
+  state.selectedLink = null
+  state.detailError = ''
+  state.detailErrorStatus = null
+}
+
 function updateHistoryFilters(patch) {
   state.historyFilters = {
     ...state.historyFilters,
@@ -437,11 +444,13 @@ export function useLinkStateStore() {
     historyFrames: computed(() => state.historyFrames),
     selectedHistoryFrame,
     businessFlows: computed(() => state.businessFlows),
+    businessFlowSource: computed(() => state.businessFlowSource),
     visibleLinkCount,
     businessFlowCount,
     loading,
     updateFilters,
     resetFilters,
+    selectLink,
     updateHistoryFilters,
     resetHistoryFilters,
     selectHistoryFrame,

@@ -62,7 +62,7 @@ export default {
       { id: 'business', icon: '业', name: '业务类型', desc: '任务流与链路承载', status: 'beta' },
       { id: 'physical', icon: '实', name: '半物理节点', desc: '真实设备接入配置', status: 'beta' },
       { id: 'balance', icon: '衡', name: '负载均衡', desc: '调度策略与权重', status: 'ready' },
-      { id: 'topology', icon: '拓', name: '二维拓扑', desc: '平面网络视图', status: 'ready' }
+      { id: 'topology', icon: '拓', name: '网络拓扑', desc: '动态链路与拥塞状态', status: 'ready' }
     ]
 
     const selectMenu = (item) => {

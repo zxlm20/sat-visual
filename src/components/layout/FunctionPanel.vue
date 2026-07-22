@@ -428,6 +428,40 @@
         v-else-if="current.id === 'topology'"
         class="module topology-module"
       >
+        <div class="topology-workspace-tabs" role="tablist" aria-label="网络拓扑功能">
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="topologyView === 'map'"
+            :class="{ active: topologyView === 'map' }"
+            @click="selectTopologyView('map')"
+          >
+            <strong>二维关系图</strong>
+            <small>节点、任务流和物理接入关系</small>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="topologyView === 'dynamic'"
+            :class="{ active: topologyView === 'dynamic' }"
+            @click="selectTopologyView('dynamic')"
+          >
+            <strong>动态拓扑</strong>
+            <small>3.6 几何可见性、历史与规则</small>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            :aria-selected="topologyView === 'links'"
+            :class="{ active: topologyView === 'links' }"
+            @click="selectTopologyView('links')"
+          >
+            <strong>链路状态</strong>
+            <small>3.7 拥塞、阈值、历史和业务流</small>
+          </button>
+        </div>
+
+        <div v-if="topologyView === 'map'" class="topology-map-view">
         <div class="summary-card">
           <span>二维拓扑</span>
           <strong>{{ topologyState.latest_job_id || '暂无最新任务' }}</strong>
@@ -526,6 +560,10 @@
           <span><i class="solid"></i>真实任务流 / 物理接入</span>
           <span><i class="dashed"></i>演示星地 / 星间链路</span>
         </div>
+        </div>
+
+        <DynamicTopologyManager v-else-if="topologyView === 'dynamic'" class="embedded-topology-manager" />
+        <LinkStateManager v-else class="embedded-topology-manager" compact />
       </div>
 
       <div
@@ -700,6 +738,8 @@ import { useNodeModelStore } from '@/store/nodeModelStore'
 import { useResourceStore } from '@/store/resourceStore'
 import AlgorithmManager from '@/components/loadBalance/AlgorithmManager.vue'
 import ConstellationGroupManager from '@/components/constellation/ConstellationGroupManager.vue'
+import DynamicTopologyManager from '@/components/topology/DynamicTopologyManager.vue'
+import LinkStateManager from '@/components/topology/LinkStateManager.vue'
 import { useConstellationGroupStore } from '@/store/constellationGroupStore'
 
 const fallbackContent = {
@@ -739,7 +779,9 @@ export default {
   name: 'FunctionPanel',
   components: {
     AlgorithmManager,
-    ConstellationGroupManager
+    ConstellationGroupManager,
+    DynamicTopologyManager,
+    LinkStateManager
   },
   emits: ['close', 'node-click', 'node-filter'],
   props: {
@@ -764,6 +806,7 @@ export default {
     const topologyTimeIndex = ref(0)
     const topologyOrbitLayer = ref('')
     const topologyIncludeSimulated = ref(true)
+    const topologyView = ref('map')
     const poolLayers = ['GROUND', 'LEO', 'MEO', 'HEO']
     const validIpv6PoolDefaults = {
       GROUND: 'fd00:310:0::/48',
@@ -960,6 +1003,13 @@ export default {
       } catch (error) {
         operationNotice.type = 'error'
         operationNotice.message = error?.message || '读取网络拓扑失败'
+      }
+    }
+
+    const selectTopologyView = (view) => {
+      topologyView.value = view
+      if (view === 'map' && topologyState.nodes.length === 0 && !topologyState.loading) {
+        loadTopology()
       }
     }
 
@@ -1544,8 +1594,8 @@ export default {
     }
 
     watch(
-      () => props.current?.id,
-      (id) => {
+      () => [props.current?.id, props.current?.topologyView],
+      ([id, requestedTopologyView]) => {
         if (id === 'tasks' && taskState.jobs.length === 0 && !taskState.loadingJobs) {
           loadJobs()
         }
@@ -1560,8 +1610,13 @@ export default {
             nodeDirectoryLocalError.value = error?.message || '读取物理节点列表失败'
           })
         }
-        if (id === 'topology' && topologyState.nodes.length === 0 && !topologyState.loading) {
-          loadTopology()
+        if (id === 'topology') {
+          if (['map', 'dynamic', 'links'].includes(requestedTopologyView)) {
+            topologyView.value = requestedTopologyView
+          }
+          if (topologyView.value === 'map' && topologyState.nodes.length === 0 && !topologyState.loading) {
+            loadTopology()
+          }
         }
         if (id === 'balance' && balanceView.value === 'load' && !loadState.loading) {
           refreshLoadModule()
@@ -1624,6 +1679,8 @@ export default {
       topologyTimeIndex,
       topologyOrbitLayer,
       topologyIncludeSimulated,
+      topologyView,
+      selectTopologyView,
       topologyTrafficLevels: TOPOLOGY_TRAFFIC_META,
       lbState,
       balanceView,
@@ -1773,34 +1830,44 @@ export default {
 }
 
 .function-panel.topology-full .topology-module {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  gap: 12px;
+  height: 100%;
+}
+
+.function-panel.topology-full .topology-map-view {
   display: grid;
   grid-template-columns: 286px minmax(0, 1fr);
   grid-template-rows: auto auto auto auto minmax(0, 1fr) auto;
   gap: 12px 16px;
-  height: 100%;
+  min-height: 0;
+  flex: 1;
 }
 
-.function-panel.topology-full .summary-card {
+.function-panel.topology-full .topology-map-view > .summary-card {
   grid-column: 1;
   grid-row: 1;
 }
 
-.function-panel.topology-full .task-toolbar {
+.function-panel.topology-full .topology-map-view > .task-toolbar {
   grid-column: 1;
   grid-row: 2;
 }
 
-.function-panel.topology-full .topology-controls {
+.function-panel.topology-full .topology-map-view > .topology-controls {
   grid-column: 1;
   grid-row: 3;
 }
 
-.function-panel.topology-full .error-box {
+.function-panel.topology-full .topology-map-view > .error-box {
   grid-column: 1;
   grid-row: 4;
 }
 
-.function-panel.topology-full .topology-legends {
+.function-panel.topology-full .topology-map-view > .topology-legends {
   grid-column: 1;
   grid-row: 5;
   align-content: flex-start;
@@ -1810,7 +1877,7 @@ export default {
   border-radius: 7px;
 }
 
-.function-panel.topology-full .topology-canvas {
+.function-panel.topology-full .topology-map-view > .topology-canvas {
   grid-column: 2;
   grid-row: 1 / 6;
   width: 100%;
@@ -1818,7 +1885,7 @@ export default {
   min-height: 0;
 }
 
-.function-panel.topology-full .topology-link-types {
+.function-panel.topology-full .topology-map-view > .topology-link-types {
   grid-column: 2;
   grid-row: 6;
   justify-content: center;
@@ -1826,6 +1893,59 @@ export default {
   background: rgba(2, 18, 28, .5);
   border: 1px solid rgba(82, 196, 255, .14);
   border-radius: 6px;
+}
+
+.topology-workspace-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.topology-workspace-tabs button {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px 13px;
+  text-align: left;
+  color: rgba(226, 255, 251, .72);
+  background: rgba(2, 18, 28, .55);
+  border: 1px solid rgba(82, 196, 255, .2);
+  border-radius: 7px;
+  cursor: pointer;
+}
+
+.topology-workspace-tabs button:hover,
+.topology-workspace-tabs button.active {
+  color: #efffff;
+  background: rgba(56, 255, 183, .09);
+  border-color: rgba(56, 255, 183, .5);
+  box-shadow: inset 0 0 18px rgba(56, 255, 183, .05);
+}
+
+.topology-workspace-tabs strong,
+.topology-workspace-tabs small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topology-workspace-tabs strong {
+  font-size: 14px;
+}
+
+.topology-workspace-tabs small {
+  color: rgba(186, 222, 227, .58);
+  font-size: 11px;
+}
+
+.embedded-topology-manager {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid rgba(82, 196, 255, .12);
+  border-radius: 8px;
+  background: rgba(1, 8, 16, .42);
 }
 
 .panel-header,

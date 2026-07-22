@@ -697,7 +697,12 @@
 
   <!-- ========== 规则保存确认弹窗 ========== -->
   <Teleport to="body">
-    <div v-if="showRulesConfirm" class="modal-overlay" @click.self="cancelRulesConfirm">
+    <div
+      v-if="showRulesConfirm"
+      class="modal-overlay"
+      data-function-panel-overlay
+      @click.self="cancelRulesConfirm"
+    >
       <div class="modal-dialog">
         <div class="modal-header">
           <span class="modal-icon">⚠</span>

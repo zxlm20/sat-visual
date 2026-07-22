@@ -1,5 +1,5 @@
 <template>
-  <section class="link-state-manager">
+  <section class="link-state-manager" :class="{ compact }">
     <header class="manager-header">
       <div>
         <span class="eyebrow">3.7 链路状态</span>
@@ -732,6 +732,12 @@ const CONGESTION_LABELS = {
 
 export default {
   name: 'LinkStateManager',
+  props: {
+    compact: {
+      type: Boolean,
+      default: false
+    }
+  },
   setup() {
     const {
       state,
@@ -1038,7 +1044,9 @@ export default {
     const formatJson = (value) => JSON.stringify(value || {}, null, 2)
 
     onMounted(() => {
-      refreshStatus()
+      refreshStatus().then(() => {
+        if (state.selectedLinkId) openLinkDetail({ id: state.selectedLinkId })
+      })
       refreshThresholds()
       queryBusinessFlows()
     })
@@ -1113,6 +1121,17 @@ export default {
     linear-gradient(135deg, #010309, #03131d 52%, #01050a);
   scrollbar-color: rgba(82, 196, 255, .48) rgba(1, 10, 17, .72);
   scrollbar-width: thin;
+}
+
+.link-state-manager.compact {
+  height: 100%;
+  min-height: 0;
+  padding: 14px;
+  background: transparent;
+}
+
+.link-state-manager.compact .manager-header h1 {
+  font-size: 20px;
 }
 
 .manager-header,

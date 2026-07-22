@@ -8,7 +8,7 @@ export function useInteraction(viewerRef) {
   let clickHandler = null
   let hoverHandler = null
 
-  const initPick = (onSatClick) => {
+  const initPick = (onSatClick, onLinkClick) => {
     if (!viewerRef.value) return
 
     clickHandler = new Cesium.ScreenSpaceEventHandler(viewerRef.value.canvas)
@@ -16,9 +16,15 @@ export function useInteraction(viewerRef) {
     clickHandler.setInputAction((clickEvent) => {
       const pickResult = viewerRef.value.scene.pick(clickEvent.position)
       const entity = pickResult?.id
+      const topologyLink = entity?.topologyLink
       const nodeId = entity?.properties?.node_id?.getValue(
         viewerRef.value.clock.currentTime
       )
+
+      if (Cesium.defined(pickResult) && topologyLink) {
+        if (onLinkClick) onLinkClick(topologyLink)
+        return
+      }
 
       if (Cesium.defined(pickResult) && nodeId) {
         selectedSatId.value = nodeId

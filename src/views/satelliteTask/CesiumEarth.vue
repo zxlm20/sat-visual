@@ -157,7 +157,7 @@ export default {
       default: null
     }
   },
-  emits: ['sat-click'],
+  emits: ['sat-click', 'link-click'],
   setup(props, { emit }) {
     const cesiumContainer = ref(null)
     const hoverInfo = ref(null)
@@ -444,6 +444,8 @@ export default {
 
         initPick((satId) => {
           emit('sat-click', satId)
+        }, (link) => {
+          emit('link-click', link)
         })
 
         initHover((payload) => {

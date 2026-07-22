@@ -16,6 +16,7 @@
     <CesiumEarth
       :visible-node-ids="visibleNodeIds"
       @sat-click="handleSatClick"
+      @link-click="handleLinkClick"
     />
 
     <div ref="nodePanelWrap">
@@ -49,6 +50,8 @@ import { useRealtimeStore } from '@/store/realtimeStore'
 import { useConstellationStore } from '@/store/constellationStore'
 import { useNodeModelStore } from '@/store/nodeModelStore'
 import { useResourceStore } from '@/store/resourceStore'
+import { useLinkStateStore } from '@/store/linkStateStore'
+import { useTopologyStore } from '@/store/topologyStore'
 
 export default {
   name: 'SatelliteTask',
@@ -65,6 +68,7 @@ export default {
     const nodePanelWrap = ref(null)
     const nodeDetailLoading = ref(false)
     let lastNodeOpenAt = 0
+    let lastPanelOpenAt = 0
     let nodeOpenRequestId = 0
     let resourceRefreshTimer = null
     let resourcePollCount = 0
@@ -92,6 +96,11 @@ export default {
       clearSelectedLoad
     } = useLoadStore()
     const { connectStatusSocket, stopRealtime } = useRealtimeStore()
+    const { state: topologyState } = useTopologyStore()
+    const {
+      updateFilters: updateLinkFilters,
+      selectLink: selectTopologyLink
+    } = useLinkStateStore()
     const {
       state: nodeModelState,
       fetchManagementData,
@@ -197,7 +206,23 @@ export default {
     ))
 
     const changeMenu = (item) => {
+      lastPanelOpenAt = Date.now()
       currentMenu.value = item
+    }
+
+    const handleLinkClick = (link) => {
+      if (!link?.id) return
+      lastPanelOpenAt = Date.now()
+      updateLinkFilters({ timeIndex: topologyState.liveTimeIndex })
+      selectTopologyLink(link.id)
+      currentMenu.value = {
+        id: 'topology',
+        icon: '拓',
+        name: '网络拓扑',
+        desc: '动态链路与拥塞状态',
+        status: 'ready',
+        topologyView: 'links'
+      }
     }
 
     const closePanel = () => {
@@ -282,7 +307,13 @@ export default {
         target.closest('[data-function-panel-overlay]')
       )
 
-      if (currentMenu.value && !isInSidebar && !isInPanel && !isInFunctionPanelOverlay) {
+      if (
+        currentMenu.value &&
+        !isInSidebar &&
+        !isInPanel &&
+        !isInFunctionPanelOverlay &&
+        Date.now() - lastPanelOpenAt > 100
+      ) {
         closePanel()
       }
       if (
@@ -336,6 +367,7 @@ export default {
       changeMenu,
       closePanel,
       handleSatClick,
+      handleLinkClick,
       applyNodeFilter,
       closeNodePanel
     }

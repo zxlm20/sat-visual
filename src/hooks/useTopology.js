@@ -110,7 +110,7 @@ export function useTopology(viewerRef) {
   const createFlowEntity = (link) => {
     const viewer = getViewer()
     if (!viewer || link.link_type !== 'task_stream') return null
-    return viewer.entities.add({
+    const entity = viewer.entities.add({
       id: `${FLOW_PREFIX}${link.id}`,
       name: `任务流方向: ${link.source} → ${link.target}`,
       position: makeFlowPosition(link),
@@ -134,6 +134,8 @@ export function useTopology(viewerRef) {
         scaleByDistance: new Cesium.NearFarScalar(1000000, 1.2, 70000000, 0.72)
       }
     })
+    entity.topologyLink = link
+    return entity
   }
 
   const createLinkEntity = (link) => {
