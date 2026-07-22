@@ -468,7 +468,7 @@
 
         <section class="detail-panel business-flow-panel">
           <div class="section-title">
-            <strong>当前推理业务流</strong>
+            <strong>最近推理业务流</strong>
             <span>GET /api/links/business-flows</span>
           </div>
 
@@ -1020,7 +1020,9 @@ export default {
 
       const min = value.min_percent ?? value.min ?? value.from
       const max = value.max_percent ?? value.max ?? value.to
-      if (min !== undefined && max !== undefined) return `${min}-${max}%`
+      if (min !== undefined && max !== undefined) {
+        return Number(max) >= 1000000 ? `>=${min}%` : `${min}-${max}%`
+      }
       if (min !== undefined) return `>=${min}%`
       if (max !== undefined) return `<${max}%`
       return fallback
