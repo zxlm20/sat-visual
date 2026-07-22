@@ -7,11 +7,16 @@ const routes = [
     name: 'SatelliteTask',
     component: SatelliteTask
   },
-  // ---- 开发调试路由（星座分组任务临时路由，项目负责人合并时决定是否保留） ----
+  // 独立功能验收路由，正式接入主界面后可按需移除。
   {
     path: '/dev/constellation-groups',
     name: 'ConstellationGroupDemo',
     component: () => import('../views/dev/ConstellationGroupDemo.vue')
+  },
+  {
+    path: '/dev/load-balancing',
+    name: 'LoadBalancingDemo',
+    component: () => import('../views/dev/LoadBalancingDemo.vue')
   }
 ]
 
