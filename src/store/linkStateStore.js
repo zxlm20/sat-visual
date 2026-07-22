@@ -58,6 +58,7 @@ const state = reactive({
   thresholdsError: '',
   historyError: '',
   businessFlowError: '',
+  cancelMessage: '',
   actionMessage: '',
   updateTime: null
 })
@@ -114,6 +115,40 @@ function stopAllRequests() {
   stopRequest('businessFlows')
 }
 
+function setLoading(slotName, value) {
+  if (slotName === 'status') state.loadingStatus = value
+  if (slotName === 'detail') state.loadingDetail = value
+  if (slotName === 'thresholds') state.loadingThresholds = value
+  if (slotName === 'history') state.loadingHistory = value
+  if (slotName === 'businessFlows') state.loadingBusinessFlows = value
+}
+
+function stopTrackedRequest(slotName) {
+  const controller = getController(slotName)
+  if (!controller) return false
+  controller.abort()
+  clearController(slotName, controller)
+  setLoading(slotName, false)
+  return true
+}
+
+function cancelAllRequests() {
+  const cancelled = [
+    stopTrackedRequest('status'),
+    stopTrackedRequest('detail'),
+    stopTrackedRequest('thresholds'),
+    stopTrackedRequest('history'),
+    stopTrackedRequest('businessFlows')
+  ].some(Boolean)
+
+  if (cancelled) {
+    state.savingThresholds = false
+    state.cancelMessage = '已取消正在进行的链路请求'
+  }
+
+  return cancelled
+}
+
 function setError(target, statusTarget, error, fallbackMessage) {
   if (isAbortError(error)) return
   state[target] = getLinkStateErrorMessage(error) || fallbackMessage
@@ -123,6 +158,7 @@ function setError(target, statusTarget, error, fallbackMessage) {
 function clearMainError() {
   state.error = ''
   state.errorStatus = null
+  state.cancelMessage = ''
 }
 
 function normalizeNumber(value, fallback = 0) {
@@ -226,7 +262,9 @@ async function fetchStatus() {
     setError('error', 'errorStatus', error, '查询链路状态失败')
     throw error
   } finally {
-    state.loadingStatus = false
+    if (getController('status') === controller) {
+      state.loadingStatus = false
+    }
     clearController('status', controller)
   }
 }
@@ -259,7 +297,9 @@ async function fetchLinkDetail(linkId = state.selectedLinkId) {
     setError('detailError', 'detailErrorStatus', error, fallback)
     throw error
   } finally {
-    state.loadingDetail = false
+    if (getController('detail') === controller) {
+      state.loadingDetail = false
+    }
     clearController('detail', controller)
   }
 }
@@ -279,7 +319,9 @@ async function fetchThresholds() {
     setError('thresholdsError', null, error, '查询链路阈值失败')
     throw error
   } finally {
-    state.loadingThresholds = false
+    if (getController('thresholds') === controller) {
+      state.loadingThresholds = false
+    }
     clearController('thresholds', controller)
   }
 }
@@ -327,7 +369,9 @@ async function fetchHistory() {
     setError('historyError', null, error, '查询链路历史失败')
     throw error
   } finally {
-    state.loadingHistory = false
+    if (getController('history') === controller) {
+      state.loadingHistory = false
+    }
     clearController('history', controller)
   }
 }
@@ -347,7 +391,9 @@ async function fetchBusinessFlows() {
     setError('businessFlowError', null, error, '查询最近业务流失败')
     throw error
   } finally {
-    state.loadingBusinessFlows = false
+    if (getController('businessFlows') === controller) {
+      state.loadingBusinessFlows = false
+    }
     clearController('businessFlows', controller)
   }
 }
@@ -407,6 +453,7 @@ export function useLinkStateStore() {
     fetchHistory,
     fetchBusinessFlows,
     fetchOverview,
+    cancelAllRequests,
     stopAllRequests
   }
 }

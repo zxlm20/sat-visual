@@ -5,14 +5,28 @@
         <span class="eyebrow">3.7 链路状态</span>
         <h1>链路状态与拥塞监控</h1>
       </div>
-      <button type="button" :disabled="state.loadingStatus" @click="refreshStatus">
-        {{ state.loadingStatus ? '查询中...' : '刷新链路' }}
-      </button>
+      <div class="header-actions">
+        <button
+          type="button"
+          class="secondary"
+          :disabled="!loading"
+          @click="cancelRequests"
+        >
+          取消请求
+        </button>
+        <button type="button" :disabled="state.loadingStatus" @click="refreshStatus">
+          {{ state.loadingStatus ? '查询中...' : '刷新链路' }}
+        </button>
+      </div>
     </header>
 
     <div v-if="state.error" class="notice error" role="alert">
       <strong v-if="state.errorStatus">HTTP {{ state.errorStatus }}</strong>
       {{ state.error }}
+    </div>
+
+    <div v-if="state.cancelMessage" class="notice info" role="status">
+      {{ state.cancelMessage }}
     </div>
 
     <div class="layout">
@@ -730,6 +744,7 @@ export default {
       selectedHistoryFrame,
       businessFlows,
       businessFlowSource,
+      loading,
       updateFilters,
       resetFilters,
       updateHistoryFilters,
@@ -742,6 +757,7 @@ export default {
       saveThresholds,
       fetchHistory,
       fetchBusinessFlows,
+      cancelAllRequests,
       stopAllRequests
     } = useLinkStateStore()
 
@@ -882,6 +898,10 @@ export default {
       } catch (_) {
         // Store 已写入错误信息，避免重复提示。
       }
+    }
+
+    const cancelRequests = () => {
+      cancelAllRequests()
     }
 
     const resetHistoryAndQuery = async () => {
@@ -1035,6 +1055,7 @@ export default {
       selectedHistoryFrame,
       businessFlows,
       businessFlowSource,
+      loading,
       thresholdGroups,
       congestionEntries,
       congestionLevels,
@@ -1047,6 +1068,7 @@ export default {
       saveThresholdDraft,
       queryHistory,
       queryBusinessFlows,
+      cancelRequests,
       resetHistoryAndQuery,
       resetAndRefresh,
       updateFilter,
@@ -1103,6 +1125,13 @@ export default {
 
 .manager-header {
   margin-bottom: 14px;
+}
+
+.header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .eyebrow {
@@ -1175,6 +1204,12 @@ button.secondary {
   color: #b9ffe7;
   background: rgba(56, 255, 183, .08);
   border: 1px solid rgba(56, 255, 183, .26);
+}
+
+.notice.info {
+  color: #bdefff;
+  background: rgba(82, 196, 255, .08);
+  border: 1px solid rgba(82, 196, 255, .26);
 }
 
 .layout {
