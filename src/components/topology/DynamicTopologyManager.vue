@@ -296,13 +296,249 @@
             </table>
           </div>
         </div>
+
+        <!-- ========== 历史回放 ========== -->
+        <div class="dtm-section">
+          <div
+            class="section-header"
+            @click="showHistory = !showHistory"
+          >
+            <span class="section-toggle">{{ showHistory ? '▼' : '▶' }}</span>
+            <span class="section-title">历史回放</span>
+          </div>
+          <div v-if="showHistory" class="section-body">
+            <!-- 历史查询表单 -->
+            <div class="history-form">
+              <div class="history-form-row">
+                <div class="filter-item">
+                  <label class="filter-label">起始时间</label>
+                  <input
+                    v-model.number="historyStart"
+                    type="number"
+                    min="0"
+                    step="1"
+                    class="filter-input"
+                    :disabled="store.state.historyLoading"
+                  />
+                </div>
+                <div class="filter-item">
+                  <label class="filter-label">结束时间</label>
+                  <input
+                    v-model.number="historyEnd"
+                    type="number"
+                    min="0"
+                    step="1"
+                    class="filter-input"
+                    :disabled="store.state.historyLoading"
+                  />
+                </div>
+                <div class="filter-item">
+                  <label class="filter-label">步长</label>
+                  <input
+                    v-model.number="historyStep"
+                    type="number"
+                    min="1"
+                    step="1"
+                    class="filter-input"
+                    :disabled="store.state.historyLoading"
+                  />
+                </div>
+                <div class="filter-item filter-action">
+                  <button
+                    class="dtm-btn dtm-btn-secondary"
+                    :disabled="store.state.historyLoading"
+                    @click="handleQueryHistory"
+                  >
+                    {{ store.state.historyLoading ? '查询中...' : '查询历史' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 历史错误 -->
+            <div
+              v-if="store.state.historyError"
+              class="history-error"
+            >
+              <span class="error-icon">⚠</span>
+              {{ store.state.historyError }}
+            </div>
+
+            <!-- 历史加载中 -->
+            <div
+              v-if="store.state.historyLoading"
+              class="history-loading"
+            >
+              <div class="spinner"></div>
+              <span>正在查询历史帧...</span>
+            </div>
+
+            <!-- 历史已加载 -->
+            <template v-if="store.state.historyFrames.length > 0">
+              <!-- 帧导航 -->
+              <div class="frame-nav">
+                <div class="frame-nav-row">
+                  <button
+                    class="frame-btn"
+                    :disabled="store.state.historyCurrentIndex <= 0"
+                    @click="goToFirstFrame"
+                    title="首帧"
+                  >◀◀</button>
+                  <button
+                    class="frame-btn"
+                    :disabled="store.state.historyCurrentIndex <= 0"
+                    @click="goToPrevFrame"
+                    title="上一帧"
+                  >◀</button>
+
+                  <span class="frame-label">
+                    第 <strong>{{ store.state.historyCurrentIndex + 1 }}</strong>
+                    / {{ store.state.historyFrameCount }} 帧
+                  </span>
+
+                  <button
+                    class="frame-btn"
+                    :disabled="store.state.historyCurrentIndex >= store.state.historyFrames.length - 1"
+                    @click="goToNextFrame"
+                    title="下一帧"
+                  >▶</button>
+                  <button
+                    class="frame-btn"
+                    :disabled="store.state.historyCurrentIndex >= store.state.historyFrames.length - 1"
+                    @click="goToLastFrame"
+                    title="末帧"
+                  >▶▶</button>
+                </div>
+
+                <!-- 进度条 -->
+                <div class="frame-progress-wrap">
+                  <input
+                    type="range"
+                    class="frame-progress"
+                    :min="0"
+                    :max="Math.max(0, store.state.historyFrames.length - 1)"
+                    :value="store.state.historyCurrentIndex"
+                    @input="onFrameSlider"
+                  />
+                </div>
+              </div>
+
+              <!-- 当前帧信息 -->
+              <div
+                v-if="currentFrame"
+                class="frame-info"
+              >
+                <div class="frame-info-row">
+                  <span class="frame-info-item">
+                    time_index: <strong>{{ currentFrame.time_index }}</strong>
+                  </span>
+                  <span class="frame-info-item">
+                    time_offset: <strong>{{ currentFrame.time_offset_seconds }}s</strong>
+                  </span>
+                </div>
+                <div class="frame-info-row" v-if="currentFrame.summary">
+                  <span class="frame-info-item">
+                    节点: <strong>{{ currentFrame.summary.node_count }}</strong>
+                  </span>
+                  <span class="frame-info-item">
+                    链路: <strong>{{ currentFrame.summary.available_link_count }}</strong>
+                  </span>
+                  <span class="frame-info-item">
+                    ISL: <strong>{{ currentFrame.summary.isl_count }}</strong>
+                  </span>
+                  <span class="frame-info-item">
+                    GSL: <strong>{{ currentFrame.summary.gsl_count }}</strong>
+                  </span>
+                </div>
+              </div>
+
+              <!-- 当前帧节点/链路列表 -->
+              <div class="frame-detail-grid">
+                <div class="frame-detail-col">
+                  <div class="frame-detail-title">节点 ({{ currentFrame?.nodes?.length || 0 }})</div>
+                  <div
+                    v-if="!currentFrame?.nodes?.length"
+                    class="section-empty"
+                  >
+                    无节点
+                  </div>
+                  <table v-else class="dtm-table">
+                    <thead>
+                      <tr>
+                        <th>节点 ID</th>
+                        <th>类型</th>
+                        <th>可用链路</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="node in currentFrame.nodes" :key="node.node_id">
+                        <td class="cell-id">{{ node.node_id }}</td>
+                        <td>
+                          <span
+                            class="type-tag"
+                            :class="node.node_type === 'ground' ? 'type-ground' : 'type-satellite'"
+                          >
+                            {{ node.node_type === 'ground' ? '地面' : '卫星' }}
+                          </span>
+                        </td>
+                        <td class="cell-count">{{ node.available_link_count }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="frame-detail-col">
+                  <div class="frame-detail-title">链路 ({{ currentFrame?.links?.length || 0 }})</div>
+                  <div
+                    v-if="!currentFrame?.links?.length"
+                    class="section-empty"
+                  >
+                    无链路
+                  </div>
+                  <table v-else class="dtm-table">
+                    <thead>
+                      <tr>
+                        <th>类型</th>
+                        <th>源</th>
+                        <th>目标</th>
+                        <th>距离 (km)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr v-for="link in currentFrame.links" :key="link.id">
+                        <td>
+                          <span
+                            class="link-type-tag"
+                            :class="link.link_type === 'isl' ? 'type-isl' : 'type-gsl'"
+                          >
+                            {{ link.link_type.toUpperCase() }}
+                          </span>
+                        </td>
+                        <td class="cell-id">{{ link.source }}</td>
+                        <td class="cell-id">{{ link.target }}</td>
+                        <td class="cell-num">{{ formatNumber(link.distance_km) }}</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </template>
+
+            <!-- 历史空状态 -->
+            <div
+              v-else-if="!store.state.historyLoading && !store.state.historyError"
+              class="section-empty"
+            >
+              请输入起始时间、结束时间和步长后点击"查询历史"
+            </div>
+          </div>
+        </div>
       </template>
     </template>
   </div>
 </template>
 
 <script>
-import { reactive, onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useDynamicTopologyStore } from '@/store/dynamicTopologyStore'
 
 export default {
@@ -321,6 +557,12 @@ export default {
     // 折叠状态
     const showNodes = ref(true)
     const showLinks = ref(true)
+    const showHistory = ref(true)
+
+    // 历史查询条件
+    const historyStart = ref(0)
+    const historyEnd = ref(60)
+    const historyStep = ref(5)
 
     /** 执行查询：将本地筛选同步到 store 并请求快照 */
     async function handleQuery() {
@@ -342,6 +584,58 @@ export default {
     async function refreshData() {
       await store.loadConstellationOptions()
       await handleQuery()
+    }
+
+    // =====================================================================
+    // 历史回放
+    // =====================================================================
+
+    /** 当前帧数据（computed-like，通过 ref 缓存） */
+    const currentFrame = computed(() => {
+      if (
+        store.state.historyCurrentIndex < 0 ||
+        store.state.historyCurrentIndex >= store.state.historyFrames.length
+      ) return null
+      return store.state.historyFrames[store.state.historyCurrentIndex]
+    })
+
+    /** 查询历史帧 */
+    async function handleQueryHistory() {
+      if (store.state.historyLoading) return
+      try {
+        await store.fetchHistory({
+          startTimeIndex: historyStart.value,
+          endTimeIndex: historyEnd.value,
+          step: historyStep.value
+        })
+      } catch (_) {
+        // 错误由 store.state.historyError 展示
+      }
+    }
+
+    /** 跳到首帧 */
+    function goToFirstFrame() {
+      store.setHistoryFrame(0)
+    }
+
+    /** 上一帧 */
+    function goToPrevFrame() {
+      store.setHistoryFrame(store.state.historyCurrentIndex - 1)
+    }
+
+    /** 下一帧 */
+    function goToNextFrame() {
+      store.setHistoryFrame(store.state.historyCurrentIndex + 1)
+    }
+
+    /** 跳到末帧 */
+    function goToLastFrame() {
+      store.setHistoryFrame(store.state.historyFrames.length - 1)
+    }
+
+    /** 拖拽进度条 */
+    function onFrameSlider(event) {
+      store.setHistoryFrame(Number(event.target.value))
     }
 
     // 格式化工具
@@ -382,7 +676,18 @@ export default {
       localIncludeGsl,
       showNodes,
       showLinks,
+      showHistory,
+      historyStart,
+      historyEnd,
+      historyStep,
+      currentFrame,
       handleQuery,
+      handleQueryHistory,
+      goToFirstFrame,
+      goToPrevFrame,
+      goToNextFrame,
+      goToLastFrame,
+      onFrameSlider,
       refreshData,
       formatPosition,
       formatVelocity,
@@ -794,5 +1099,185 @@ export default {
 .type-gsl {
   background: rgba(82, 196, 255, 0.12);
   color: #52c4ff;
+}
+
+/* ===================== 历史回放 ===================== */
+.history-form {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(56, 255, 183, 0.06);
+}
+
+.history-form-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.history-error {
+  margin: 8px 14px;
+  padding: 8px 12px;
+  background: rgba(255, 68, 68, 0.1);
+  border: 1px solid rgba(255, 68, 68, 0.25);
+  border-radius: 4px;
+  color: #ff6b6b;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.history-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px;
+  justify-content: center;
+  color: rgba(255,255,255,0.5);
+  font-size: 13px;
+}
+
+/* 帧导航 */
+.frame-nav {
+  padding: 10px 14px;
+  border-bottom: 1px solid rgba(56, 255, 183, 0.06);
+}
+
+.frame-nav-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: center;
+}
+
+.frame-btn {
+  background: rgba(56, 255, 183, 0.08);
+  border: 1px solid rgba(56, 255, 183, 0.15);
+  border-radius: 4px;
+  color: #e0e0e0;
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.frame-btn:hover:not(:disabled) {
+  background: rgba(56, 255, 183, 0.15);
+  border-color: #38ffb7;
+}
+
+.frame-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.frame-label {
+  font-size: 13px;
+  color: rgba(255,255,255,0.6);
+  min-width: 100px;
+  text-align: center;
+}
+
+.frame-label strong {
+  color: #38ffb7;
+  font-weight: 600;
+}
+
+/* 进度条 */
+.frame-progress-wrap {
+  margin-top: 8px;
+  padding: 0 4px;
+}
+
+.frame-progress {
+  width: 100%;
+  height: 4px;
+  -webkit-appearance: none;
+  appearance: none;
+  background: rgba(56, 255, 183, 0.12);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.frame-progress::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #38ffb7;
+  cursor: pointer;
+  border: 2px solid #010309;
+  box-shadow: 0 0 6px rgba(56, 255, 183, 0.4);
+}
+
+.frame-progress::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #38ffb7;
+  cursor: pointer;
+  border: 2px solid #010309;
+}
+
+/* 帧信息 */
+.frame-info {
+  padding: 8px 14px;
+  background: rgba(56, 255, 183, 0.02);
+  border-bottom: 1px solid rgba(56, 255, 183, 0.06);
+}
+
+.frame-info-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 4px;
+}
+
+.frame-info-item {
+  font-size: 12px;
+  color: rgba(255,255,255,0.5);
+}
+
+.frame-info-item strong {
+  color: rgba(255,255,255,0.8);
+  font-weight: 600;
+}
+
+/* 帧详情双列 */
+.frame-detail-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+}
+
+.frame-detail-col {
+  overflow-x: auto;
+}
+
+.frame-detail-col:first-child {
+  border-right: 1px solid rgba(56, 255, 183, 0.06);
+}
+
+.frame-detail-title {
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: rgba(255,255,255,0.5);
+  background: rgba(56, 255, 183, 0.02);
+  border-bottom: 1px solid rgba(56, 255, 183, 0.06);
+}
+
+/* 次要按钮 */
+.dtm-btn-secondary {
+  background: rgba(82, 196, 255, 0.1);
+  border: 1px solid rgba(82, 196, 255, 0.2);
+  color: #52c4ff;
+}
+
+.dtm-btn-secondary:hover:not(:disabled) {
+  background: rgba(82, 196, 255, 0.18);
+  border-color: #52c4ff;
 }
 </style>
