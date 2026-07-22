@@ -28,6 +28,17 @@
       />
     </div>
 
+    <div ref="linkPanelWrap">
+      <LinkDetailPanel
+        :selected-link-id="linkState.selectedLinkId"
+        :selected-link="linkState.selectedLink"
+        :loading="linkState.loadingDetail"
+        :error="linkState.detailError"
+        :time-index="linkState.filters.timeIndex"
+        @close="closeLinkPanel"
+      />
+    </div>
+
     <div class="grid-overlay"></div>
     <div class="edge-glow edge-left"></div>
     <div class="edge-glow edge-right"></div>
@@ -44,6 +55,7 @@ import CesiumEarth from './CesiumEarth.vue'
 import Sidebar from '@/components/layout/Sidebar.vue'
 import FunctionPanel from '@/components/layout/FunctionPanel.vue'
 import NodeDetailPanel from '@/components/layout/NodeDetailPanel.vue'
+import LinkDetailPanel from '@/components/layout/LinkDetailPanel.vue'
 import { useLoadStore } from '@/store/loadStore'
 import { useNodeStore } from '@/store/nodeStore'
 import { useRealtimeStore } from '@/store/realtimeStore'
@@ -59,16 +71,19 @@ export default {
     CesiumEarth,
     Sidebar,
     FunctionPanel,
-    NodeDetailPanel
+    NodeDetailPanel,
+    LinkDetailPanel
   },
   setup() {
     const currentMenu = ref(null)
     const sidebarWrap = ref(null)
     const panelWrap = ref(null)
     const nodePanelWrap = ref(null)
+    const linkPanelWrap = ref(null)
     const nodeDetailLoading = ref(false)
     let lastNodeOpenAt = 0
     let lastPanelOpenAt = 0
+    let lastLinkOpenAt = 0
     let nodeOpenRequestId = 0
     let resourceRefreshTimer = null
     let resourcePollCount = 0
@@ -99,8 +114,11 @@ export default {
     const { state: topologyState } = useTopologyStore()
     const {
       updateFilters: updateLinkFilters,
-      selectLink: selectTopologyLink
+      selectLink: selectTopologyLink,
+      clearSelectedLink,
+      fetchLinkDetail
     } = useLinkStateStore()
+    const linkState = useLinkStateStore().state
     const {
       state: nodeModelState,
       fetchManagementData,
@@ -210,18 +228,16 @@ export default {
       currentMenu.value = item
     }
 
-    const handleLinkClick = (link) => {
+    const handleLinkClick = async (link) => {
       if (!link?.id) return
-      lastPanelOpenAt = Date.now()
+      lastLinkOpenAt = Date.now()
+      closeNodePanel()
       updateLinkFilters({ timeIndex: topologyState.liveTimeIndex })
-      selectTopologyLink(link.id)
-      currentMenu.value = {
-        id: 'topology',
-        icon: '拓',
-        name: '网络拓扑',
-        desc: '动态链路与拥塞状态',
-        status: 'ready',
-        topologyView: 'links'
+      selectTopologyLink(link)
+      try {
+        await fetchLinkDetail(link.id)
+      } catch (_) {
+        // 右侧链路详情面板会展示接口返回的具体错误。
       }
     }
 
@@ -230,6 +246,7 @@ export default {
     }
 
     const handleSatClick = async (nodeId) => {
+      closeLinkPanel()
       const requestId = ++nodeOpenRequestId
       lastNodeOpenAt = Date.now()
       nodeDetailLoading.value = true
@@ -291,6 +308,10 @@ export default {
       clearSelectedComputeNode()
     }
 
+    const closeLinkPanel = () => {
+      clearSelectedLink()
+    }
+
     const applyNodeFilter = ({ nodeIds }) => {
       visibleNodeIds.value = [...nodeIds]
       if (selectedNode.value && !visibleNodeIds.value.includes(selectedNode.value.node_id)) {
@@ -303,6 +324,7 @@ export default {
       const isInSidebar = sidebarWrap.value?.contains(target)
       const isInPanel = panelWrap.value?.contains(target)
       const isInNodePanel = nodePanelWrap.value?.contains(target)
+      const isInLinkPanel = linkPanelWrap.value?.contains(target)
       const isInFunctionPanelOverlay = target instanceof Element && Boolean(
         target.closest('[data-function-panel-overlay]')
       )
@@ -323,6 +345,14 @@ export default {
         Date.now() - lastNodeOpenAt > 100
       ) {
         closeNodePanel()
+      }
+      if (
+        !isInLinkPanel &&
+        !isInFunctionPanelOverlay &&
+        (linkState.selectedLinkId || linkState.loadingDetail) &&
+        Date.now() - lastLinkOpenAt > 100
+      ) {
+        closeLinkPanel()
       }
     }
 
@@ -360,16 +390,19 @@ export default {
       sidebarWrap,
       panelWrap,
       nodePanelWrap,
+      linkPanelWrap,
       selectedNode,
       nodeDetailError,
       nodeDetailLoading,
+      linkState,
       visibleNodeIds,
       changeMenu,
       closePanel,
       handleSatClick,
       handleLinkClick,
       applyNodeFilter,
-      closeNodePanel
+      closeNodePanel,
+      closeLinkPanel
     }
   }
 }

@@ -228,8 +228,18 @@ function resetFilters() {
   state.filters = { ...DEFAULT_FILTERS }
 }
 
-function selectLink(linkId) {
+function selectLink(link) {
+  const linkId = typeof link === 'object' ? link?.id : link
   state.selectedLinkId = String(linkId || '')
+  state.selectedLink = typeof link === 'object' ? { ...link } : null
+  state.detailError = ''
+  state.detailErrorStatus = null
+}
+
+function clearSelectedLink() {
+  stopRequest('detail')
+  state.loadingDetail = false
+  state.selectedLinkId = ''
   state.selectedLink = null
   state.detailError = ''
   state.detailErrorStatus = null
@@ -451,6 +461,7 @@ export function useLinkStateStore() {
     updateFilters,
     resetFilters,
     selectLink,
+    clearSelectedLink,
     updateHistoryFilters,
     resetHistoryFilters,
     selectHistoryFrame,

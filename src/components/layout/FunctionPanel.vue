@@ -562,8 +562,12 @@
         </div>
         </div>
 
-        <DynamicTopologyManager v-else-if="topologyView === 'dynamic'" class="embedded-topology-manager" />
-        <LinkStateManager v-else class="embedded-topology-manager" compact />
+        <div v-else-if="topologyView === 'dynamic'" class="embedded-topology-manager">
+          <DynamicTopologyManager />
+        </div>
+        <div v-else class="embedded-topology-manager">
+          <LinkStateManager compact />
+        </div>
       </div>
 
       <div
@@ -1941,11 +1945,20 @@ export default {
 
 .embedded-topology-manager {
   flex: 1;
+  height: 0;
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: rgba(82, 196, 255, .52) rgba(1, 10, 17, .72);
+  scrollbar-width: thin;
   border: 1px solid rgba(82, 196, 255, .12);
   border-radius: 8px;
   background: rgba(1, 8, 16, .42);
+}
+
+.embedded-topology-manager > :deep(*) {
+  min-height: max-content;
 }
 
 .panel-header,
