@@ -89,6 +89,7 @@ function normalizeLink(link = {}) {
     link.simulated ?? link.is_simulated ?? link.demo_link
   )
   const simulated = Boolean(typeMeta.simulated) || explicitlySimulated || linkType.endsWith('_demo')
+  const simulatedColor = linkType === 'gsl_demo' ? '#62d9ff' : '#a78bfa'
   return {
     ...link,
     id: String(link.id || `${link.source}-${link.target}-${linkType}`),
@@ -102,7 +103,7 @@ function normalizeLink(link = {}) {
     traffic_level: trafficLevel,
     traffic_label: link.traffic_label || trafficMeta.label,
     color_level: Number.isFinite(Number(link.color_level)) ? Number(link.color_level) : trafficMeta.rank,
-    color: trafficMeta.color
+    color: simulated ? simulatedColor : trafficMeta.color
   }
 }
 

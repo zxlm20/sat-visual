@@ -269,6 +269,7 @@
       <div
         v-if="showConfirm"
         class="modal-overlay"
+        data-function-panel-overlay
         @click.self="cancelConfirm"
       >
         <div class="modal-box" role="dialog">
@@ -290,6 +291,7 @@
       <div
         v-if="showMoveMember"
         class="modal-overlay"
+        data-function-panel-overlay
         @click.self="cancelMoveMember"
       >
         <div class="modal-box" role="dialog">

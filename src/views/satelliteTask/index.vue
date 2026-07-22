@@ -278,12 +278,16 @@ export default {
       const isInSidebar = sidebarWrap.value?.contains(target)
       const isInPanel = panelWrap.value?.contains(target)
       const isInNodePanel = nodePanelWrap.value?.contains(target)
+      const isInFunctionPanelOverlay = target instanceof Element && Boolean(
+        target.closest('[data-function-panel-overlay]')
+      )
 
-      if (currentMenu.value && !isInSidebar && !isInPanel) {
+      if (currentMenu.value && !isInSidebar && !isInPanel && !isInFunctionPanelOverlay) {
         closePanel()
       }
       if (
         !isInNodePanel &&
+        !isInFunctionPanelOverlay &&
         (selectedNode.value || nodeDetailLoading.value) &&
         Date.now() - lastNodeOpenAt > 100
       ) {

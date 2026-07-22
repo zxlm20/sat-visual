@@ -8,6 +8,8 @@ import {
 const LINK_PREFIX = 'topology-link::'
 const FLOW_PREFIX = 'topology-flow::'
 const TASK_STREAM_COLOR = '#ff4fd8'
+const SIMULATED_GROUND_LINK_COLOR = '#62d9ff'
+const SIMULATED_INTER_SATELLITE_COLOR = '#a78bfa'
 
 export function useTopology(viewerRef) {
   const linkEntities = new Map()
@@ -70,11 +72,16 @@ export function useTopology(viewerRef) {
       })
     }
     if (isSimulatedLink(link)) {
+      const simulatedColor = Cesium.Color.fromCssColorString(
+        link.link_type === 'gsl_demo'
+          ? SIMULATED_GROUND_LINK_COLOR
+          : SIMULATED_INTER_SATELLITE_COLOR
+      )
       return new Cesium.PolylineDashMaterialProperty({
-        color: color.withAlpha(0.42),
+        color: simulatedColor.withAlpha(0.78),
         gapColor: Cesium.Color.TRANSPARENT,
-        dashLength: link.link_type === 'gsl_demo' ? 16 : 12,
-        dashPattern: 0xF0F0
+        dashLength: link.link_type === 'gsl_demo' ? 26 : 20,
+        dashPattern: 0xFF00
       })
     }
     return new Cesium.ColorMaterialProperty(color.withAlpha(
@@ -84,7 +91,7 @@ export function useTopology(viewerRef) {
 
   const linkWidth = (link) => {
     if (link.link_type === 'task_stream') return 3.2
-    if (isSimulatedLink(link)) return 0.8
+    if (isSimulatedLink(link)) return 1.25
     const level = Number(link.color_level || 0)
     return Math.min(2, (link.link_type === 'task_stream' ? 1.2 : 1) + level * 0.14)
   }
