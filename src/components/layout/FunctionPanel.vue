@@ -186,6 +186,20 @@
             </select>
           </label>
           <label>
+            <span>所属星座</span>
+            <select v-model="nodeConstellationFilter">
+              <option value="">全部星座</option>
+              <option
+                v-for="group in constellationFilterOptions"
+                :key="group.constellation_id"
+                :value="group.constellation_id"
+              >
+                {{ group.constellation_name }}（{{ group.member_count ?? (group.members || []).length }}）
+              </option>
+              <option value="__unassigned__">未分配星座</option>
+            </select>
+          </label>
+          <label>
             <span>节点状态</span>
             <select v-model="nodeStatusFilter">
               <option value="">全部状态</option>
@@ -686,6 +700,7 @@ import { useNodeModelStore } from '@/store/nodeModelStore'
 import { useResourceStore } from '@/store/resourceStore'
 import AlgorithmManager from '@/components/loadBalance/AlgorithmManager.vue'
 import ConstellationGroupManager from '@/components/constellation/ConstellationGroupManager.vue'
+import { useConstellationGroupStore } from '@/store/constellationGroupStore'
 
 const fallbackContent = {
   ephemeris: {
@@ -737,9 +752,11 @@ export default {
     const nodeDirectoryLoading = ref(false)
     const nodeDirectoryLocalError = ref('')
     const nodeLayerFilter = ref('')
+    const nodeConstellationFilter = ref('')
     const nodeStatusFilter = ref('')
     const nodeNameKeyword = ref('')
     const appliedNodeLayer = ref('')
+    const appliedNodeConstellation = ref('')
     const appliedNodeStatus = ref('')
     const appliedNodeKeyword = ref('')
     const syncOverwrite = ref(false)
@@ -803,6 +820,10 @@ export default {
       refreshConstellationNodes
     } = useConstellationStore()
     const {
+      state: constellationGroupState,
+      fetchGroups: fetchConstellationGroups
+    } = useConstellationGroupStore()
+    const {
       state: nodeModelState,
       fetchManagementData,
       synchronizeModels,
@@ -859,6 +880,7 @@ export default {
         const [computeNodes] = await Promise.all([
           fetchNodes(),
           constellationRequest,
+          fetchConstellationGroups().catch(() => null),
           fetchManagementData(),
           fetchNodeResources().catch(() => null),
           fetchLoadStatus().catch(() => null)
@@ -1243,6 +1265,16 @@ export default {
       return ({ L: 'LEO', M: 'MEO', H: 'HEO' })[prefix] || ''
     }
     const allNodeDirectory = computed(() => {
+      const groupByNodeId = new Map()
+      constellationGroupState.groups.forEach((group) => {
+        const members = group.members || []
+        members.forEach((nodeId) => {
+          groupByNodeId.set(String(nodeId), {
+            constellation_id: group.constellation_id,
+            constellation_name: group.constellation_name
+          })
+        })
+      })
       const constellationById = new Map(
         constellationState.nodes.map((node) => [node.node_id, node])
       )
@@ -1338,6 +1370,7 @@ export default {
           alarm_level: resource?.alarm_level || node.alarm_level || null,
           load: getLoadByNodeId(node.node_id, physicalNode) || node.load || null
         }
+        const constellationGroup = groupByNodeId.get(String(normalizedNode.node_id || ''))
         const layer = getDirectoryLayer(normalizedNode)
         const isGround = layer === 'GROUND'
         const layerLabel = ({
@@ -1368,10 +1401,12 @@ export default {
           ...normalizedNode,
           type: normalizedNode.node_type || normalizedNode.type,
           directoryLayer: layer,
+          directoryConstellationId: constellationGroup?.constellation_id || normalizedNode.constellation_id || '',
+          directoryConstellationName: constellationGroup?.constellation_name || normalizedNode.constellation_name || '',
           directoryLabel: layerLabel,
           directoryDescription: normalizedNode.node_name
-            ? `${normalizedNode.node_name} · ${binding}${logicalIp}`
-            : `${binding}${logicalIp}`,
+            ? `${normalizedNode.node_name}${constellationGroup?.constellation_name ? ` · ${constellationGroup.constellation_name}` : ''} · ${binding}${logicalIp}`
+            : `${constellationGroup?.constellation_name ? `${constellationGroup.constellation_name} · ` : ''}${binding}${logicalIp}`,
           directoryExtra: resourceExtra || (hasAltitude
             ? `${Number(normalizedNode.avg_altitude_km).toFixed(1)} km`
             : `${normalizedNode.online === true ? '在线' : (normalizedNode.online === false ? '离线' : '状态未知')} · ${binding}`),
@@ -1389,6 +1424,15 @@ export default {
       const keyword = appliedNodeKeyword.value.toLowerCase()
       return allNodeDirectory.value.filter((node) => {
         if (appliedNodeLayer.value && node.directoryLayer !== appliedNodeLayer.value) return false
+        if (
+          appliedNodeConstellation.value === '__unassigned__' &&
+          (node.directoryLayer === 'GROUND' || node.directoryConstellationId)
+        ) return false
+        if (
+          appliedNodeConstellation.value &&
+          appliedNodeConstellation.value !== '__unassigned__' &&
+          node.directoryConstellationId !== appliedNodeConstellation.value
+        ) return false
         if (appliedNodeStatus.value === 'online' && node.online !== true) return false
         if (appliedNodeStatus.value === 'offline' && node.online !== false) return false
         if (!keyword) return true
@@ -1397,6 +1441,7 @@ export default {
           node.node_name,
           node.physical_node,
           node.compute_node_id,
+          node.directoryConstellationName,
           node.constellation_type,
           node.role
         ].some((value) => String(value || '').toLowerCase().includes(keyword))
@@ -1404,10 +1449,12 @@ export default {
     })
     const applyNodeFilter = () => {
       appliedNodeLayer.value = nodeLayerFilter.value
+      appliedNodeConstellation.value = nodeConstellationFilter.value
       appliedNodeStatus.value = nodeStatusFilter.value
       appliedNodeKeyword.value = nodeNameKeyword.value.trim()
       emit('node-filter', {
         layer: appliedNodeLayer.value,
+        constellationId: appliedNodeConstellation.value,
         status: appliedNodeStatus.value,
         keyword: appliedNodeKeyword.value,
         nodeIds: nodeDirectory.value.map((node) => node.node_id)
@@ -1415,6 +1462,7 @@ export default {
     }
     const resetNodeFilter = () => {
       nodeLayerFilter.value = ''
+      nodeConstellationFilter.value = ''
       nodeStatusFilter.value = ''
       nodeNameKeyword.value = ''
       applyNodeFilter()
@@ -1422,6 +1470,7 @@ export default {
     const nodeDirectoryError = computed(() => (
       nodeDirectoryLocalError.value || nodeModelState.error || nodeState.error || constellationState.error
     ))
+    const constellationFilterOptions = computed(() => constellationGroupState.groups)
     const leoNodeCount = computed(() => (
       allNodeDirectory.value.filter((node) => node.directoryLayer === 'LEO').length
     ))
@@ -1533,10 +1582,12 @@ export default {
       nodeDirectoryError,
       nodeDirectoryLoading,
       nodeLayerFilter,
+      nodeConstellationFilter,
       nodeStatusFilter,
       nodeNameKeyword,
       applyNodeFilter,
       resetNodeFilter,
+      constellationFilterOptions,
       nodeModelState,
       resourceState,
       resourceTargets,

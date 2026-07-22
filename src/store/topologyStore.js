@@ -13,6 +13,8 @@ export const TOPOLOGY_TRAFFIC_META = {
 export const TOPOLOGY_LINK_TYPE_META = {
   physical_access: { label: '物理接入', simulated: false },
   task_stream: { label: '任务流', simulated: false },
+  gsl: { label: '几何星地链路', simulated: true },
+  isl: { label: '几何星间链路', simulated: true },
   gsl_demo: { label: '演示星地链路', simulated: true },
   isl_intra_plane: { label: '演示星间链路', simulated: true }
 }
@@ -64,6 +66,17 @@ function readBooleanFlag(value) {
   return false
 }
 
+export function isSimulatedTopologyLink(link = {}) {
+  const linkType = String(link.link_type || link.type || '').toLowerCase()
+  const calculationSource = String(link.calculation_source || '').toLowerCase()
+  const typeMeta = TOPOLOGY_LINK_TYPE_META[linkType]
+  return Boolean(typeMeta?.simulated) ||
+    readBooleanFlag(link.simulated ?? link.is_simulated ?? link.demo_link) ||
+    linkType.endsWith('_demo') ||
+    calculationSource === 'ephemeris_geometry' ||
+    String(link.status || '').toLowerCase() === 'available'
+}
+
 function normalizeNode(node = {}) {
   const loadLevel = canonicalLevel(node.load?.level || node.status?.load_level)
   return {
@@ -85,11 +98,8 @@ function normalizeLink(link = {}) {
   const trafficLevel = canonicalLevel(link.traffic_level || link.congestion_level)
   const trafficMeta = TOPOLOGY_TRAFFIC_META[trafficLevel] || TOPOLOGY_TRAFFIC_META.idle
   const typeMeta = TOPOLOGY_LINK_TYPE_META[linkType] || { label: linkType, simulated: false }
-  const explicitlySimulated = readBooleanFlag(
-    link.simulated ?? link.is_simulated ?? link.demo_link
-  )
-  const simulated = Boolean(typeMeta.simulated) || explicitlySimulated || linkType.endsWith('_demo')
-  const simulatedColor = linkType === 'gsl_demo' ? '#62d9ff' : '#a78bfa'
+  const simulated = isSimulatedTopologyLink(link)
+  const simulatedColor = ['gsl', 'gsl_demo'].includes(linkType) ? '#62d9ff' : '#a78bfa'
   return {
     ...link,
     id: String(link.id || `${link.source}-${link.target}-${linkType}`),
