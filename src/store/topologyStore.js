@@ -55,6 +55,15 @@ function canonicalLevel(value) {
   })[level] || level
 }
 
+function readBooleanFlag(value) {
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'number') return value !== 0
+  if (typeof value === 'string') {
+    return ['true', '1', 'yes', 'on'].includes(value.trim().toLowerCase())
+  }
+  return false
+}
+
 function normalizeNode(node = {}) {
   const loadLevel = canonicalLevel(node.load?.level || node.status?.load_level)
   return {
@@ -72,10 +81,14 @@ function normalizeNode(node = {}) {
 }
 
 function normalizeLink(link = {}) {
-  const linkType = link.link_type || link.type || 'unknown'
+  const linkType = String(link.link_type || link.type || 'unknown').toLowerCase()
   const trafficLevel = canonicalLevel(link.traffic_level || link.congestion_level)
   const trafficMeta = TOPOLOGY_TRAFFIC_META[trafficLevel] || TOPOLOGY_TRAFFIC_META.idle
   const typeMeta = TOPOLOGY_LINK_TYPE_META[linkType] || { label: linkType, simulated: false }
+  const explicitlySimulated = readBooleanFlag(
+    link.simulated ?? link.is_simulated ?? link.demo_link
+  )
+  const simulated = Boolean(typeMeta.simulated) || explicitlySimulated || linkType.endsWith('_demo')
   return {
     ...link,
     id: String(link.id || `${link.source}-${link.target}-${linkType}`),
@@ -84,7 +97,7 @@ function normalizeLink(link = {}) {
     link_type: linkType,
     type: linkType,
     type_label: typeMeta.label,
-    simulated: typeMeta.simulated,
+    simulated,
     traffic: Number(link.traffic || 0),
     traffic_level: trafficLevel,
     traffic_label: link.traffic_label || trafficMeta.label,

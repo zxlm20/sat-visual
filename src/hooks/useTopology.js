@@ -14,6 +14,13 @@ export function useTopology(viewerRef) {
   const flowEntities = new Map()
   const activeLinks = ref([])
   let visibleNodeIds = null
+  let simulatedLinksVisible = true
+
+  const isSimulatedLink = (link = {}) => (
+    link.simulated === true ||
+    link.is_simulated === true ||
+    String(link.link_type || link.type || '').toLowerCase().endsWith('_demo')
+  )
 
   const getViewer = () => {
     const viewer = viewerRef?.value
@@ -23,6 +30,7 @@ export function useTopology(viewerRef) {
   const getNodeEntity = (nodeId) => getViewer()?.entities.getById(nodeId)
 
   const isLinkVisible = (link) => {
+    if (isSimulatedLink(link) && !simulatedLinksVisible) return false
     if (visibleNodeIds && (
       !visibleNodeIds.has(link.source) || !visibleNodeIds.has(link.target)
     )) return false
@@ -61,10 +69,12 @@ export function useTopology(viewerRef) {
         taperPower: 0.55
       })
     }
-    if (link.simulated) {
+    if (isSimulatedLink(link)) {
       return new Cesium.PolylineDashMaterialProperty({
-        color: color.withAlpha(0.28),
-        dashLength: link.link_type === 'gsl_demo' ? 20 : 14
+        color: color.withAlpha(0.42),
+        gapColor: Cesium.Color.TRANSPARENT,
+        dashLength: link.link_type === 'gsl_demo' ? 16 : 12,
+        dashPattern: 0xF0F0
       })
     }
     return new Cesium.ColorMaterialProperty(color.withAlpha(
@@ -74,7 +84,7 @@ export function useTopology(viewerRef) {
 
   const linkWidth = (link) => {
     if (link.link_type === 'task_stream') return 3.2
-    if (link.simulated) return 0.8
+    if (isSimulatedLink(link)) return 0.8
     const level = Number(link.color_level || 0)
     return Math.min(2, (link.link_type === 'task_stream' ? 1.2 : 1) + level * 0.14)
   }
@@ -185,6 +195,12 @@ export function useTopology(viewerRef) {
     visibleNodeIds = Array.isArray(nodeIds) ? new Set(nodeIds) : null
   }
 
+  const setSimulatedLinksVisible = (visible) => {
+    simulatedLinksVisible = Boolean(visible)
+    const viewer = getViewer()
+    if (viewer) viewer.scene.requestRender()
+  }
+
   const clearTopologyLinks = () => {
     const viewer = getViewer()
     if (viewer) linkEntities.forEach((entity) => viewer.entities.remove(entity))
@@ -208,7 +224,7 @@ export function useTopology(viewerRef) {
       physical: 0
     }
     activeLinks.value.forEach((link) => {
-      if (link.simulated) counts.simulated += 1
+      if (isSimulatedLink(link)) counts.simulated += 1
       else counts.real += 1
       if (link.link_type === 'task_stream') counts.task += 1
       if (link.link_type === 'physical_access') counts.physical += 1
@@ -223,6 +239,7 @@ export function useTopology(viewerRef) {
     trafficLevels: TOPOLOGY_TRAFFIC_META,
     syncTopologyLinks,
     applyTopologyVisibility,
+    setSimulatedLinksVisible,
     clearTopologyLinks,
     destroyTopology
   }
