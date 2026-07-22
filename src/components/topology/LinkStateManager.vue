@@ -166,6 +166,110 @@
           </div>
         </section>
 
+        <section class="detail-panel threshold-panel">
+          <div class="section-title">
+            <strong>六档拥塞阈值</strong>
+            <span>GET /api/links/thresholds · PUT /api/links/thresholds</span>
+          </div>
+
+          <div v-if="state.thresholdsError" class="notice warning" role="alert">
+            {{ state.thresholdsError }}
+          </div>
+
+          <div v-if="state.actionMessage" class="notice success" role="status">
+            {{ state.actionMessage }}
+          </div>
+
+          <div class="threshold-toolbar">
+            <span>
+              当前版本
+              <strong>{{ thresholds?.version ?? thresholds?.thresholds_version ?? '-' }}</strong>
+            </span>
+            <div>
+              <button
+                type="button"
+                class="secondary"
+                :disabled="state.loadingThresholds || state.savingThresholds"
+                @click="refreshThresholds"
+              >
+                {{ state.loadingThresholds ? '读取中...' : '读取阈值' }}
+              </button>
+              <button
+                type="button"
+                :disabled="state.loadingThresholds || state.savingThresholds || !thresholds"
+                @click="saveThresholdDraft"
+              >
+                {{ state.savingThresholds ? '保存中...' : '保存阈值' }}
+              </button>
+            </div>
+          </div>
+
+          <div v-if="thresholds" class="threshold-content">
+            <div class="threshold-groups">
+              <div
+                v-for="group in thresholdGroups"
+                :key="group.key"
+                class="threshold-group"
+              >
+                <strong>{{ group.label }}</strong>
+                <label
+                  v-for="item in group.items"
+                  :key="`${group.key}-${item.key}`"
+                >
+                  <span>{{ item.label }}</span>
+                  <input
+                    type="number"
+                    step="0.01"
+                    :value="getThresholdValue(group.key, item.key)"
+                    @input="updateThresholdValue(group.key, item.key, $event.target.value)"
+                  />
+                </label>
+              </div>
+
+              <div class="threshold-group">
+                <strong>估算 tile 大小</strong>
+                <label>
+                  <span>estimated_tile_bytes</span>
+                  <input
+                    type="number"
+                    step="1"
+                    :value="state.thresholdDraft.estimated_tile_bytes"
+                    @input="updateThresholdRootValue('estimated_tile_bytes', $event.target.value)"
+                  />
+                </label>
+              </div>
+            </div>
+
+            <div class="congestion-levels">
+              <strong>六档利用率区间</strong>
+              <div class="level-strip">
+                <span
+                  v-for="level in congestionLevels"
+                  :key="level.key"
+                  :style="{ '--level-color': getCongestionColor(level.key) }"
+                >
+                  <i></i>
+                  {{ formatCongestion(level.key) }}
+                  <b>{{ level.range }}</b>
+                </span>
+              </div>
+            </div>
+
+            <details class="threshold-json">
+              <summary>查看待提交 JSON</summary>
+              <pre>{{ formatJson(state.thresholdDraft) }}</pre>
+            </details>
+          </div>
+
+          <div v-else-if="state.loadingThresholds" class="empty-box">
+            正在读取阈值配置...
+          </div>
+
+          <div v-else class="empty-box">
+            点击“读取阈值”后编辑链路容量、处理时延和基础丢包配置
+          </div>
+        </section>
+
         <section class="detail-panel link-list-panel">
           <div class="section-title">
             <strong>链路列表</strong>
@@ -313,12 +417,48 @@ export default {
       summary,
       snapshot,
       selectedLink,
+      thresholds,
       updateFilters,
       resetFilters,
       fetchStatus,
       fetchLinkDetail,
+      fetchThresholds,
+      saveThresholds,
       stopAllRequests
     } = useLinkStateStore()
+
+    const thresholdGroups = [
+      {
+        key: 'capacities_mbps',
+        label: '链路容量 Mbps',
+        items: [
+          { key: 'isl', label: 'isl' },
+          { key: 'gsl', label: 'gsl' },
+          { key: 'task_stream', label: 'task_stream' },
+          { key: 'physical_access', label: 'physical_access' }
+        ]
+      },
+      {
+        key: 'processing_delay_ms',
+        label: '处理时延 ms',
+        items: [
+          { key: 'isl', label: 'isl' },
+          { key: 'gsl', label: 'gsl' },
+          { key: 'task_stream', label: 'task_stream' },
+          { key: 'physical_access', label: 'physical_access' }
+        ]
+      },
+      {
+        key: 'base_loss_percent',
+        label: '基础丢包率 %',
+        items: [
+          { key: 'isl', label: 'isl' },
+          { key: 'gsl', label: 'gsl' },
+          { key: 'task_stream', label: 'task_stream' },
+          { key: 'physical_access', label: 'physical_access' }
+        ]
+      }
+    ]
 
     const congestionEntries = computed(() => {
       const source = summary.value?.by_congestion || {}
@@ -328,9 +468,58 @@ export default {
         .map((key) => ({ key, value: source[key] }))
     })
 
+    const congestionLevels = computed(() => {
+      const configured = state.thresholdDraft.congestion_levels
+      const orderedKeys = ['idle', 'smooth', 'normal', 'light', 'medium', 'heavy']
+      const defaults = {
+        idle: '0-10%',
+        smooth: '10-30%',
+        normal: '30-55%',
+        light: '55-70%',
+        medium: '70-85%',
+        heavy: '>=85%'
+      }
+
+      if (Array.isArray(configured)) {
+        return configured.map((item) => ({
+          key: item.level || item.name || item.key,
+          range: formatRange(item)
+        }))
+      }
+
+      if (configured && typeof configured === 'object') {
+        return orderedKeys.map((key) => ({
+          key,
+          range: formatRange(configured[key], defaults[key])
+        }))
+      }
+
+      return orderedKeys.map((key) => ({
+        key,
+        range: defaults[key]
+      }))
+    })
+
     const refreshStatus = async () => {
       try {
         await fetchStatus()
+      } catch (_) {
+        // Store 已写入错误信息，避免重复提示。
+      }
+    }
+
+    const refreshThresholds = async () => {
+      try {
+        await fetchThresholds()
+      } catch (_) {
+        // Store 已写入错误信息，避免重复提示。
+      }
+    }
+
+    const saveThresholdDraft = async () => {
+      try {
+        await saveThresholds(state.thresholdDraft)
+        await refreshStatus()
       } catch (_) {
         // Store 已写入错误信息，避免重复提示。
       }
@@ -344,6 +533,26 @@ export default {
     const updateFilter = (name, value) => {
       updateFilters({ [name]: value })
     }
+
+    const normalizeDraftNumber = (value) => {
+      const numberValue = Number(value)
+      return Number.isFinite(numberValue) ? numberValue : 0
+    }
+
+    const updateThresholdValue = (groupKey, itemKey, value) => {
+      if (!state.thresholdDraft[groupKey]) {
+        state.thresholdDraft[groupKey] = {}
+      }
+      state.thresholdDraft[groupKey][itemKey] = normalizeDraftNumber(value)
+    }
+
+    const updateThresholdRootValue = (key, value) => {
+      state.thresholdDraft[key] = normalizeDraftNumber(value)
+    }
+
+    const getThresholdValue = (groupKey, itemKey) => (
+      state.thresholdDraft[groupKey]?.[itemKey] ?? ''
+    )
 
     const openLinkDetail = async (link) => {
       if (!link?.id) return
@@ -402,6 +611,19 @@ export default {
     const formatCongestion = (value) => CONGESTION_LABELS[value] || value || '-'
     const formatBusinessTypes = (value) => Array.isArray(value) ? value.join('、') : ''
 
+    const formatRange = (value, fallback = '-') => {
+      if (!value) return fallback
+      if (typeof value === 'string') return value
+      if (typeof value !== 'object') return String(value)
+
+      const min = value.min_percent ?? value.min ?? value.from
+      const max = value.max_percent ?? value.max ?? value.to
+      if (min !== undefined && max !== undefined) return `${min}-${max}%`
+      if (min !== undefined) return `>=${min}%`
+      if (max !== undefined) return `<${max}%`
+      return fallback
+    }
+
     const formatTime = (value) => {
       if (!value) return '-'
       const date = new Date(value)
@@ -411,7 +633,10 @@ export default {
 
     const formatJson = (value) => JSON.stringify(value || {}, null, 2)
 
-    onMounted(refreshStatus)
+    onMounted(() => {
+      refreshStatus()
+      refreshThresholds()
+    })
     onBeforeUnmount(stopAllRequests)
 
     return {
@@ -420,10 +645,18 @@ export default {
       summary,
       snapshot,
       selectedLink,
+      thresholds,
+      thresholdGroups,
       congestionEntries,
+      congestionLevels,
       refreshStatus,
+      refreshThresholds,
+      saveThresholdDraft,
       resetAndRefresh,
       updateFilter,
+      updateThresholdValue,
+      updateThresholdRootValue,
+      getThresholdValue,
       openLinkDetail,
       mapEntries,
       getColorLevel,
@@ -534,6 +767,13 @@ button.secondary {
   color: #ffe39a;
   background: rgba(255, 184, 77, .08);
   border: 1px solid rgba(255, 184, 77, .34);
+}
+
+.notice.success {
+  margin: 0 0 10px;
+  color: #b9ffe7;
+  background: rgba(56, 255, 183, .08);
+  border: 1px solid rgba(56, 255, 183, .26);
 }
 
 .layout {
@@ -700,6 +940,124 @@ select:focus {
   box-shadow: 0 0 10px currentColor;
 }
 
+.threshold-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.threshold-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  color: rgba(226, 255, 251, .7);
+  background: rgba(2, 18, 28, .62);
+  border: 1px solid rgba(82, 196, 255, .18);
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.threshold-toolbar strong {
+  margin-left: 4px;
+  color: #fff;
+}
+
+.threshold-toolbar > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.threshold-content {
+  display: grid;
+  gap: 10px;
+}
+
+.threshold-groups {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.threshold-group {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  background: rgba(2, 18, 28, .62);
+  border: 1px solid rgba(82, 196, 255, .18);
+  border-radius: 7px;
+}
+
+.threshold-group > strong,
+.congestion-levels > strong {
+  color: #38ffb7;
+  font-size: 12px;
+}
+
+.threshold-group label span {
+  display: block;
+  margin-bottom: 5px;
+  color: rgba(201, 255, 247, .54);
+  font-size: 11px;
+}
+
+.congestion-levels {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  background: rgba(2, 18, 28, .62);
+  border: 1px solid rgba(82, 196, 255, .18);
+  border-radius: 7px;
+}
+
+.level-strip {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.level-strip span {
+  min-width: 0;
+  padding: 8px;
+  color: rgba(226, 255, 251, .82);
+  background:
+    linear-gradient(90deg, color-mix(in srgb, var(--level-color, #94a3b8) 18%, transparent), transparent),
+    rgba(1, 10, 17, .52);
+  border: 1px solid color-mix(in srgb, var(--level-color, #94a3b8) 32%, transparent);
+  border-radius: 6px;
+  font-size: 11px;
+}
+
+.level-strip i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  background: var(--level-color, #94a3b8);
+  border-radius: 50%;
+  box-shadow: 0 0 10px var(--level-color, #94a3b8);
+}
+
+.level-strip b {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: #fff;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.threshold-json {
+  color: rgba(226, 255, 251, .72);
+  font-size: 12px;
+}
+
+.threshold-json summary {
+  cursor: pointer;
+}
+
 .link-table {
   margin-top: 10px;
   overflow: hidden;
@@ -850,7 +1208,9 @@ pre {
   }
 
   .summary-grid,
-  .metric-groups {
+  .metric-groups,
+  .threshold-groups,
+  .level-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -858,8 +1218,15 @@ pre {
 @media (max-width: 820px) {
   .summary-grid,
   .metric-groups,
+  .threshold-groups,
+  .level-strip,
   dl {
     grid-template-columns: 1fr;
+  }
+
+  .threshold-toolbar {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .link-row {
