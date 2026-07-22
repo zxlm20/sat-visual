@@ -270,6 +270,188 @@
           </div>
         </section>
 
+        <section class="detail-panel history-panel">
+          <div class="section-title">
+            <strong>链路历史回放</strong>
+            <span>GET /api/links/history</span>
+          </div>
+
+          <div v-if="state.historyError" class="notice warning" role="alert">
+            {{ state.historyError }}
+          </div>
+
+          <div class="history-query">
+            <label>
+              <span>开始时刻</span>
+              <input
+                type="number"
+                step="0.1"
+                :value="state.historyFilters.startTimeIndex"
+                @input="updateHistoryFilter('startTimeIndex', $event.target.value)"
+              />
+            </label>
+            <label>
+              <span>结束时刻</span>
+              <input
+                type="number"
+                step="0.1"
+                :value="state.historyFilters.endTimeIndex"
+                @input="updateHistoryFilter('endTimeIndex', $event.target.value)"
+              />
+            </label>
+            <label>
+              <span>步长</span>
+              <input
+                type="number"
+                min="0.000001"
+                step="0.1"
+                :value="state.historyFilters.step"
+                @input="updateHistoryFilter('step', $event.target.value)"
+              />
+            </label>
+            <label>
+              <span>节点 ID</span>
+              <input
+                type="text"
+                placeholder="M001001"
+                :value="state.historyFilters.nodeId"
+                @input="updateHistoryFilter('nodeId', $event.target.value)"
+              />
+            </label>
+            <label>
+              <span>链路类型</span>
+              <select
+                :value="state.historyFilters.linkType"
+                @change="updateHistoryFilter('linkType', $event.target.value)"
+              >
+                <option value="">全部动态链路</option>
+                <option value="isl">isl</option>
+                <option value="gsl">gsl</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="history-toolbar">
+            <span>
+              预计
+              <strong :class="{ danger: estimatedHistoryFrameCount > 120 }">
+                {{ estimatedHistoryFrameCount }}
+              </strong>
+              帧，后端限制 max_history_frames=120
+            </span>
+            <div>
+              <button type="button" class="secondary" @click="resetHistoryAndQuery">
+                重置
+              </button>
+              <button
+                type="button"
+                :disabled="state.loadingHistory || estimatedHistoryFrameCount > 120"
+                @click="queryHistory"
+              >
+                {{ state.loadingHistory ? '查询中...' : '查询历史' }}
+              </button>
+            </div>
+          </div>
+
+          <div v-if="historyFrames.length" class="history-content">
+            <div class="history-overview">
+              <article>
+                <span>返回帧数</span>
+                <strong>{{ historyFrames.length }}</strong>
+              </article>
+              <article>
+                <span>当前帧</span>
+                <strong>{{ state.selectedHistoryFrameIndex + 1 }}</strong>
+              </article>
+              <article>
+                <span>time_index</span>
+                <strong>{{ getFrameTimeIndex(selectedHistoryFrame) }}</strong>
+              </article>
+              <article>
+                <span>链路数</span>
+                <strong>{{ selectedHistoryLinks.length }}</strong>
+              </article>
+            </div>
+
+            <div class="frame-picker">
+              <input
+                type="range"
+                min="0"
+                :max="historyFrames.length - 1"
+                :value="state.selectedHistoryFrameIndex"
+                @input="selectHistoryFrame($event.target.value)"
+              />
+              <div class="frame-ticks">
+                <button
+                  v-for="(frame, index) in historyFramePreview"
+                  :key="`history-frame-${index}`"
+                  type="button"
+                  class="secondary"
+                  :class="{ active: index === state.selectedHistoryFrameIndex }"
+                  @click="selectHistoryFrame(index)"
+                >
+                  {{ getFrameTimeIndex(frame) }}
+                </button>
+              </div>
+            </div>
+
+            <div class="link-table history-table">
+              <div class="link-row head">
+                <span>链路</span>
+                <span>类型/状态</span>
+                <span>距离/时延</span>
+                <span>容量</span>
+                <span>利用率</span>
+                <span>拥塞</span>
+              </div>
+              <div
+                v-for="link in selectedHistoryLinks"
+                :key="link.id"
+                class="link-row history-link-row"
+                :style="{ '--level-color': getColorLevel(link.color_level) }"
+              >
+                <span>
+                  <strong>{{ link.source || '-' }} → {{ link.target || '-' }}</strong>
+                  <small>{{ link.id || '-' }}</small>
+                </span>
+                <span>
+                  <strong>{{ formatLinkType(link.link_type) }}</strong>
+                  <small>{{ link.status || '-' }}</small>
+                </span>
+                <span>
+                  <strong>{{ formatKm(link.distance_km) }}</strong>
+                  <small>{{ formatMs(link.propagation_delay_ms ?? link.latency_ms) }}</small>
+                </span>
+                <span>
+                  <strong>{{ formatMbps(link.capacity_mbps) }}</strong>
+                  <small>{{ link.threshold_source || '-' }}</small>
+                </span>
+                <span>
+                  <strong>{{ formatPercent(link.bandwidth_utilization_percent) }}</strong>
+                  <small>{{ formatPercent(link.loss_percent) }}</small>
+                </span>
+                <span class="congestion-cell">
+                  <i></i>
+                  <strong>{{ link.congestion_label || formatCongestion(link.congestion_level) }}</strong>
+                  <small>level {{ link.color_level ?? 0 }}</small>
+                </span>
+              </div>
+            </div>
+
+            <div v-if="selectedHistoryLinks.length === 0" class="empty-box">
+              当前历史帧没有可见链路
+            </div>
+          </div>
+
+          <div v-else-if="state.loadingHistory" class="empty-box">
+            正在读取链路历史...
+          </div>
+
+          <div v-else class="empty-box">
+            输入时间范围后查询历史，可用滑块切换每一帧的动态链路状态
+          </div>
+        </section>
+
         <section class="detail-panel link-list-panel">
           <div class="section-title">
             <strong>链路列表</strong>
@@ -418,12 +600,19 @@ export default {
       snapshot,
       selectedLink,
       thresholds,
+      historyFrames,
+      selectedHistoryFrame,
       updateFilters,
       resetFilters,
+      updateHistoryFilters,
+      resetHistoryFilters,
+      selectHistoryFrame,
+      getHistoryFrameCount,
       fetchStatus,
       fetchLinkDetail,
       fetchThresholds,
       saveThresholds,
+      fetchHistory,
       stopAllRequests
     } = useLinkStateStore()
 
@@ -500,6 +689,19 @@ export default {
       }))
     })
 
+    const estimatedHistoryFrameCount = computed(() => getHistoryFrameCount())
+
+    const selectedHistoryLinks = computed(() => {
+      const frame = selectedHistoryFrame.value || {}
+      return frame.links || frame.visible_links || frame.link_states || []
+    })
+
+    const historyFramePreview = computed(() => (
+      historyFrames.value.length <= 24
+        ? historyFrames.value
+        : historyFrames.value.slice(0, 24)
+    ))
+
     const refreshStatus = async () => {
       try {
         await fetchStatus()
@@ -525,6 +727,19 @@ export default {
       }
     }
 
+    const queryHistory = async () => {
+      try {
+        await fetchHistory()
+      } catch (_) {
+        // Store 已写入错误信息，避免重复提示。
+      }
+    }
+
+    const resetHistoryAndQuery = async () => {
+      resetHistoryFilters()
+      await queryHistory()
+    }
+
     const resetAndRefresh = async () => {
       resetFilters()
       await refreshStatus()
@@ -532,6 +747,10 @@ export default {
 
     const updateFilter = (name, value) => {
       updateFilters({ [name]: value })
+    }
+
+    const updateHistoryFilter = (name, value) => {
+      updateHistoryFilters({ [name]: value })
     }
 
     const normalizeDraftNumber = (value) => {
@@ -631,6 +850,10 @@ export default {
       return date.toLocaleString()
     }
 
+    const getFrameTimeIndex = (frame) => (
+      frame?.time_index ?? frame?.timeIndex ?? frame?.time ?? '-'
+    )
+
     const formatJson = (value) => JSON.stringify(value || {}, null, 2)
 
     onMounted(() => {
@@ -646,14 +869,23 @@ export default {
       snapshot,
       selectedLink,
       thresholds,
+      historyFrames,
+      selectedHistoryFrame,
       thresholdGroups,
       congestionEntries,
       congestionLevels,
+      estimatedHistoryFrameCount,
+      selectedHistoryLinks,
+      historyFramePreview,
       refreshStatus,
       refreshThresholds,
       saveThresholdDraft,
+      queryHistory,
+      resetHistoryAndQuery,
       resetAndRefresh,
       updateFilter,
+      updateHistoryFilter,
+      selectHistoryFrame,
       updateThresholdValue,
       updateThresholdRootValue,
       getThresholdValue,
@@ -669,6 +901,7 @@ export default {
       formatCongestion,
       formatBusinessTypes,
       formatTime,
+      getFrameTimeIndex,
       formatJson
     }
   }
@@ -1058,6 +1291,125 @@ select:focus {
   cursor: pointer;
 }
 
+.history-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.history-query {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+  padding: 10px;
+  background: rgba(2, 18, 28, .62);
+  border: 1px solid rgba(82, 196, 255, .18);
+  border-radius: 7px;
+}
+
+.history-query label span {
+  display: block;
+  margin-bottom: 5px;
+  color: rgba(201, 255, 247, .54);
+  font-size: 11px;
+}
+
+.history-toolbar,
+.frame-picker {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  color: rgba(226, 255, 251, .7);
+  background: rgba(2, 18, 28, .62);
+  border: 1px solid rgba(82, 196, 255, .18);
+  border-radius: 7px;
+  font-size: 12px;
+}
+
+.history-toolbar strong {
+  color: #fff;
+}
+
+.history-toolbar strong.danger {
+  color: #ff9f43;
+}
+
+.history-toolbar > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.history-content {
+  display: grid;
+  gap: 10px;
+}
+
+.history-overview {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.history-overview article {
+  min-width: 0;
+  padding: 10px;
+  background: rgba(2, 18, 28, .62);
+  border: 1px solid rgba(82, 196, 255, .18);
+  border-radius: 7px;
+}
+
+.history-overview span,
+.history-overview strong {
+  display: block;
+}
+
+.history-overview span {
+  color: rgba(201, 255, 247, .54);
+  font-size: 11px;
+}
+
+.history-overview strong {
+  margin-top: 5px;
+  overflow: hidden;
+  color: #fff;
+  font-size: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.frame-picker {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.frame-picker input {
+  accent-color: #38ffb7;
+}
+
+.frame-ticks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.frame-ticks button {
+  min-height: 28px;
+  padding: 0 8px;
+  font-size: 11px;
+}
+
+.frame-ticks button.active {
+  color: #041a15;
+  background: #52c4ff;
+  border-color: rgba(82, 196, 255, .8);
+}
+
+.history-link-row {
+  cursor: default;
+}
+
 .link-table {
   margin-top: 10px;
   overflow: hidden;
@@ -1210,7 +1562,9 @@ pre {
   .summary-grid,
   .metric-groups,
   .threshold-groups,
-  .level-strip {
+  .level-strip,
+  .history-query,
+  .history-overview {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -1220,11 +1574,14 @@ pre {
   .metric-groups,
   .threshold-groups,
   .level-strip,
+  .history-query,
+  .history-overview,
   dl {
     grid-template-columns: 1fr;
   }
 
-  .threshold-toolbar {
+  .threshold-toolbar,
+  .history-toolbar {
     align-items: stretch;
     flex-direction: column;
   }
