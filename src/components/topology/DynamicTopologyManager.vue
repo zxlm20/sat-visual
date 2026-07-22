@@ -532,13 +532,194 @@
             </div>
           </div>
         </div>
+
+        <!-- ========== 可见性规则 ========== -->
+        <div class="dtm-section">
+          <div
+            class="section-header"
+            @click="showRules = !showRules"
+          >
+            <span class="section-toggle">{{ showRules ? '▼' : '▶' }}</span>
+            <span class="section-title">可见性规则</span>
+            <span class="section-header-spacer"></span>
+            <button
+              class="dtm-btn dtm-btn-tiny"
+              :disabled="store.state.rulesLoading"
+              @click.stop="handleFetchRules"
+            >
+              {{ store.state.rulesLoading ? '加载中...' : '刷新规则' }}
+            </button>
+          </div>
+          <div v-if="showRules" class="section-body">
+            <!-- 规则加载中 -->
+            <div
+              v-if="store.state.rulesLoading"
+              class="history-loading"
+            >
+              <div class="spinner"></div>
+              <span>正在加载规则...</span>
+            </div>
+
+            <!-- 规则错误 -->
+            <div
+              v-if="store.state.rulesError"
+              class="history-error"
+            >
+              <span class="error-icon">⚠</span>
+              {{ store.state.rulesError }}
+            </div>
+
+            <!-- 保存错误 -->
+            <div
+              v-if="store.state.saveError"
+              class="history-error"
+            >
+              <span class="error-icon">⚠</span>
+              {{ store.state.saveError }}
+              <button class="error-dismiss" @click="store.clearError()">✕</button>
+            </div>
+
+            <!-- 规则表单 -->
+            <template v-if="store.state.rules">
+              <div class="rules-form">
+                <div class="rules-form-grid">
+                  <div class="rules-field">
+                    <label class="filter-label">ISL 最大距离</label>
+                    <input
+                      v-model.number="rulesForm.islMaxDistance"
+                      type="number"
+                      min="0"
+                      class="filter-input rules-input"
+                    />
+                    <span class="rules-unit">km</span>
+                  </div>
+                  <div class="rules-field">
+                    <label class="filter-label">单星最大邻居数</label>
+                    <input
+                      v-model.number="rulesForm.islMaxNeighbors"
+                      type="number"
+                      min="1"
+                      class="filter-input rules-input"
+                    />
+                  </div>
+                  <div class="rules-field rules-field-check">
+                    <label class="filter-checkbox">
+                      <input
+                        v-model="rulesForm.sameOrbitLayerOnly"
+                        type="checkbox"
+                      />
+                      <span class="check-label">仅同轨道层 (same_orbit_layer_only)</span>
+                    </label>
+                  </div>
+                  <div class="rules-field rules-field-check">
+                    <label class="filter-checkbox">
+                      <input
+                        v-model="rulesForm.sameConstellationOnly"
+                        type="checkbox"
+                      />
+                      <span class="check-label">仅同星座 (same_constellation_only)</span>
+                    </label>
+                  </div>
+                  <div class="rules-field">
+                    <label class="filter-label">GSL 最大距离</label>
+                    <input
+                      v-model.number="rulesForm.gslMaxDistance"
+                      type="number"
+                      min="0"
+                      class="filter-input rules-input"
+                    />
+                    <span class="rules-unit">km</span>
+                  </div>
+                  <div class="rules-field">
+                    <label class="filter-label">单地面站最大链路数</label>
+                    <input
+                      v-model.number="rulesForm.gslMaxLinksPerGround"
+                      type="number"
+                      min="1"
+                      class="filter-input rules-input"
+                    />
+                  </div>
+                  <div class="rules-field">
+                    <label class="filter-label">地球净空</label>
+                    <input
+                      v-model.number="rulesForm.earthClearance"
+                      type="number"
+                      min="0"
+                      class="filter-input rules-input"
+                    />
+                    <span class="rules-unit">km</span>
+                  </div>
+                  <div class="rules-field">
+                    <label class="filter-label">Ground001 最低仰角</label>
+                    <input
+                      v-model.number="rulesForm.minElevation"
+                      type="number"
+                      min="0"
+                      max="90"
+                      class="filter-input rules-input"
+                    />
+                    <span class="rules-unit">°</span>
+                  </div>
+                </div>
+                <div class="rules-warning">
+                  ⚠ PUT 规则会修改共享后端配置，需要项目负责人同意
+                </div>
+                <button
+                  class="dtm-btn dtm-btn-danger"
+                  :disabled="store.state.saving"
+                  @click="openRulesConfirm"
+                >
+                  {{ store.state.saving ? '保存中...' : '保存规则' }}
+                </button>
+              </div>
+            </template>
+
+            <!-- 未加载规则 -->
+            <div
+              v-else-if="!store.state.rulesLoading && !store.state.rulesError"
+              class="section-empty"
+            >
+              点击"刷新规则"加载当前可见性规则配置
+            </div>
+          </div>
+        </div>
       </template>
     </template>
   </div>
+
+  <!-- ========== 规则保存确认弹窗 ========== -->
+  <Teleport to="body">
+    <div v-if="showRulesConfirm" class="modal-overlay" @click.self="cancelRulesConfirm">
+      <div class="modal-dialog">
+        <div class="modal-header">
+          <span class="modal-icon">⚠</span>
+          <span>确认修改规则</span>
+        </div>
+        <div class="modal-body">
+          <p>确定要修改拓扑可见性规则吗？</p>
+          <p class="modal-warning">此操作会修改共享后端配置，请确保已通知项目负责人。</p>
+          <label class="modal-check">
+            <input v-model="rulesNotified" type="checkbox" />
+            <span>我已通知项目负责人</span>
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button class="dtm-btn dtm-btn-outline" @click="cancelRulesConfirm">取消</button>
+          <button
+            class="dtm-btn dtm-btn-primary"
+            :disabled="!rulesNotified || store.state.saving"
+            @click="executeRulesSave"
+          >
+            {{ store.state.saving ? '保存中...' : '确认保存' }}
+          </button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <script>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useDynamicTopologyStore } from '@/store/dynamicTopologyStore'
 
 export default {
@@ -563,6 +744,92 @@ export default {
     const historyStart = ref(0)
     const historyEnd = ref(60)
     const historyStep = ref(5)
+
+    // =====================================================================
+    // 可见性规则
+    // =====================================================================
+    const showRules = ref(false)
+
+    /** 规则表单数据 */
+    const rulesForm = reactive({
+      islMaxDistance: 80000,
+      islMaxNeighbors: 4,
+      sameOrbitLayerOnly: false,
+      sameConstellationOnly: false,
+      gslMaxDistance: 50000,
+      gslMaxLinksPerGround: 8,
+      earthClearance: 50,
+      minElevation: 5
+    })
+
+    /** 从 store 的 rules 填充表单 */
+    function fillRulesForm() {
+      const r = store.state.rules
+      if (!r) return
+      rulesForm.islMaxDistance = r.isl?.max_distance_km ?? 80000
+      rulesForm.islMaxNeighbors = r.isl?.max_neighbors_per_satellite ?? 4
+      rulesForm.sameOrbitLayerOnly = r.isl?.same_orbit_layer_only ?? false
+      rulesForm.sameConstellationOnly = r.isl?.same_constellation_only ?? false
+      rulesForm.gslMaxDistance = r.gsl?.max_distance_km ?? 50000
+      rulesForm.gslMaxLinksPerGround = r.gsl?.max_links_per_ground ?? 8
+      rulesForm.earthClearance = r.earth_clearance_km ?? 50
+      rulesForm.minElevation = r.ground_stations?.Ground001?.min_elevation_deg ?? 5
+    }
+
+    // 确认弹窗状态
+    const showRulesConfirm = ref(false)
+    const rulesNotified = ref(false)
+
+    /** 刷新规则 */
+    async function handleFetchRules() {
+      try {
+        await store.fetchRules()
+        fillRulesForm()
+      } catch (_) {
+        // 错误由 store.state.rulesError 展示
+      }
+    }
+
+    /** 打开确认弹窗 */
+    function openRulesConfirm() {
+      rulesNotified.value = false
+      showRulesConfirm.value = true
+    }
+
+    /** 取消确认 */
+    function cancelRulesConfirm() {
+      showRulesConfirm.value = false
+      rulesNotified.value = false
+    }
+
+    /** 执行规则保存 */
+    async function executeRulesSave() {
+      try {
+        await store.updateRules({
+          earth_clearance_km: rulesForm.earthClearance,
+          isl: {
+            max_distance_km: rulesForm.islMaxDistance,
+            max_neighbors_per_satellite: rulesForm.islMaxNeighbors,
+            same_orbit_layer_only: rulesForm.sameOrbitLayerOnly,
+            same_constellation_only: rulesForm.sameConstellationOnly
+          },
+          gsl: {
+            max_distance_km: rulesForm.gslMaxDistance,
+            max_links_per_ground: rulesForm.gslMaxLinksPerGround
+          },
+          ground_stations: {
+            Ground001: {
+              min_elevation_deg: rulesForm.minElevation
+            }
+          }
+        })
+        // 刷新成功后重新用后端归一化结果填充
+        fillRulesForm()
+        cancelRulesConfirm()
+      } catch (_) {
+        // 错误由 store.state.saveError 展示
+      }
+    }
 
     /** 执行查询：将本地筛选同步到 store 并请求快照 */
     async function handleQuery() {
@@ -677,12 +944,20 @@ export default {
       showNodes,
       showLinks,
       showHistory,
+      showRules,
       historyStart,
       historyEnd,
       historyStep,
+      rulesForm,
+      showRulesConfirm,
+      rulesNotified,
       currentFrame,
       handleQuery,
       handleQueryHistory,
+      handleFetchRules,
+      openRulesConfirm,
+      cancelRulesConfirm,
+      executeRulesSave,
       goToFirstFrame,
       goToPrevFrame,
       goToNextFrame,
@@ -1279,5 +1554,181 @@ export default {
 .dtm-btn-secondary:hover:not(:disabled) {
   background: rgba(82, 196, 255, 0.18);
   border-color: #52c4ff;
+}
+
+/* 小型按钮 */
+.dtm-btn-tiny {
+  padding: 2px 10px;
+  font-size: 11px;
+  background: rgba(56, 255, 183, 0.06);
+  border: 1px solid rgba(56, 255, 183, 0.12);
+  color: rgba(255,255,255,0.6);
+  border-radius: 3px;
+}
+
+.dtm-btn-tiny:hover:not(:disabled) {
+  background: rgba(56, 255, 183, 0.12);
+  color: #38ffb7;
+}
+
+/* 危险按钮 */
+.dtm-btn-danger {
+  background: rgba(255, 68, 68, 0.1);
+  border: 1px solid rgba(255, 68, 68, 0.25);
+  color: #ff6b6b;
+}
+
+.dtm-btn-danger:hover:not(:disabled) {
+  background: rgba(255, 68, 68, 0.18);
+  border-color: #ff6b6b;
+}
+
+/* 描边按钮 */
+.dtm-btn-outline {
+  background: transparent;
+  border: 1px solid rgba(56, 255, 183, 0.2);
+  color: rgba(255,255,255,0.7);
+}
+
+.dtm-btn-outline:hover:not(:disabled) {
+  border-color: #38ffb7;
+  color: #38ffb7;
+}
+
+/* 标题栏 spacer */
+.section-header-spacer {
+  flex: 1;
+}
+
+/* ===================== 规则表单 ===================== */
+.rules-form {
+  padding: 14px;
+}
+
+.rules-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 16px;
+}
+
+.rules-field {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.rules-field .filter-label {
+  width: 100%;
+}
+
+.rules-input {
+  width: 100px !important;
+}
+
+.rules-unit {
+  font-size: 11px;
+  color: rgba(255,255,255,0.35);
+}
+
+.rules-field-check {
+  align-items: center;
+  padding-top: 16px;
+}
+
+.rules-field-check .filter-checkbox {
+  padding: 0;
+}
+
+.rules-warning {
+  margin-top: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 184, 77, 0.08);
+  border: 1px solid rgba(255, 184, 77, 0.2);
+  border-radius: 4px;
+  color: #ffb84d;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* ===================== 确认弹窗 ===================== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,0.6);
+  backdrop-filter: blur(4px);
+}
+
+.modal-dialog {
+  width: 420px;
+  max-width: calc(100vw - 40px);
+  background: rgba(10, 20, 28, 0.96);
+  border: 1px solid rgba(56, 255, 183, 0.2);
+  border-radius: 8px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+  overflow: hidden;
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 18px;
+  background: rgba(56, 255, 183, 0.04);
+  border-bottom: 1px solid rgba(56, 255, 183, 0.08);
+  font-size: 15px;
+  font-weight: 600;
+  color: #e0e0e0;
+}
+
+.modal-icon {
+  font-size: 20px;
+}
+
+.modal-body {
+  padding: 18px;
+  font-size: 14px;
+  color: rgba(255,255,255,0.8);
+  line-height: 1.6;
+}
+
+.modal-body p {
+  margin-bottom: 8px;
+}
+
+.modal-warning {
+  color: #ffb84d;
+  font-size: 13px;
+}
+
+.modal-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  background: rgba(56, 255, 183, 0.03);
+  border: 1px solid rgba(56, 255, 183, 0.1);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.modal-check input[type="checkbox"] {
+  accent-color: #38ffb7;
+  width: 16px;
+  height: 16px;
+}
+
+.modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 18px;
+  border-top: 1px solid rgba(56, 255, 183, 0.06);
 }
 </style>
