@@ -20,7 +20,7 @@
 -->
 
 <template>
-  <div class="cm-container">
+  <div class="cm-container" :class="{ compact }">
     <!-- ========== 顶部操作栏 ========== -->
     <div class="cm-header">
       <h2 class="cm-title">
@@ -344,6 +344,12 @@ function emptyForm() {
 
 export default {
   name: 'ConstellationGroupManager',
+  props: {
+    compact: {
+      type: Boolean,
+      default: false
+    }
+  },
   emits: ['select-constellation'],
   setup(props, { emit }) {
     // =====================================================================
@@ -682,6 +688,22 @@ export default {
   height: 100%;
   color: #eaffff;
   font-family: 'Microsoft YaHei', 'PingFang SC', Avenir, Helvetica, Arial, sans-serif;
+}
+
+.cm-container.compact {
+  min-height: 570px;
+  overflow: hidden;
+  background: rgba(2, 18, 28, .46);
+  border: 1px solid rgba(82, 196, 255, .18);
+  border-radius: 8px;
+}
+
+.cm-container.compact .cm-sidebar {
+  width: 250px;
+}
+
+.cm-container.compact .cm-detail {
+  padding: 16px 20px;
 }
 
 /* ---- 顶部操作栏 ---- */

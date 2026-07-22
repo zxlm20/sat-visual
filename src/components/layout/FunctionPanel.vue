@@ -4,6 +4,7 @@
     class="function-panel"
     :class="{
       wide: current.id === 'tasks',
+      'constellation-wide': current.id === 'constellation',
       'balance-wide': current.id === 'balance',
       'topology-full': current.id === 'topology'
     }"
@@ -514,6 +515,18 @@
       </div>
 
       <div
+        v-else-if="current.id === 'constellation'"
+        class="module constellation-module"
+      >
+        <div class="summary-card constellation-summary">
+          <span>星座分组配置</span>
+          <strong>管理星座档案与卫星成员</strong>
+          <p>星座是业务分组，不等同于轨道面。这里可以新建、编辑和删除星座，并调整每颗卫星所属的星座。</p>
+        </div>
+        <ConstellationGroupManager compact />
+      </div>
+
+      <div
         v-else-if="current.id === 'balance'"
         class="module balance-module"
       >
@@ -648,15 +661,6 @@
           <p>{{ fallbackContent[current.id].desc }}</p>
         </div>
 
-        <div
-          v-if="current.id === 'constellation'"
-          class="stat-grid"
-        >
-          <div class="stat-card"><span>LEO</span><strong>120</strong></div>
-          <div class="stat-card"><span>MEO</span><strong>42</strong></div>
-          <div class="stat-card"><span>GEO</span><strong>18</strong></div>
-        </div>
-
         <label
           v-if="current.id === 'ephemeris'"
           class="file-drop"
@@ -681,13 +685,9 @@ import { useConstellationStore } from '@/store/constellationStore'
 import { useNodeModelStore } from '@/store/nodeModelStore'
 import { useResourceStore } from '@/store/resourceStore'
 import AlgorithmManager from '@/components/loadBalance/AlgorithmManager.vue'
+import ConstellationGroupManager from '@/components/constellation/ConstellationGroupManager.vue'
 
 const fallbackContent = {
-  constellation: {
-    label: '当前星座',
-    title: '混合轨道星网',
-    desc: '低轨负责高频接入，中高轨负责骨干转发与广域覆盖。'
-  },
   ephemeris: {
     label: '星历源',
     title: 'TLE / JSON',
@@ -723,7 +723,8 @@ const fallbackContent = {
 export default {
   name: 'FunctionPanel',
   components: {
-    AlgorithmManager
+    AlgorithmManager,
+    ConstellationGroupManager
   },
   emits: ['close', 'node-click', 'node-filter'],
   props: {
@@ -1690,6 +1691,10 @@ export default {
 
 .function-panel.wide {
   width: 740px;
+}
+
+.function-panel.constellation-wide {
+  width: min(920px, calc(100vw - 370px));
 }
 
 .function-panel.balance-wide {
