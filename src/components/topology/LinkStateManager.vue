@@ -1081,6 +1081,7 @@ export default {
       mapEntries,
       getColorLevel,
       getCongestionColor,
+      formatNumber,
       formatMbps,
       formatMs,
       formatKm,
