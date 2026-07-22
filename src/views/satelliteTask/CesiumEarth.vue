@@ -144,7 +144,7 @@ import { useTopology } from '@/hooks/useTopology'
 import { useNodeStore } from '@/store/nodeStore'
 import { useNodeModelStore } from '@/store/nodeModelStore'
 import { useConstellationStore } from '@/store/constellationStore'
-import { useTopologyStore } from '@/store/topologyStore'
+import { isSimulatedTopologyLink, useTopologyStore } from '@/store/topologyStore'
 
 const MAX_TIME_INDEX = 20160
 const BUFFER_AHEAD_MINUTES = 60
@@ -581,10 +581,7 @@ export default {
     function filterVisibleTopologyLinks(links = []) {
       return includeSimulatedLinks.value
         ? links
-        : links.filter((link) => {
-            const type = String(link.link_type || link.type || '').toLowerCase()
-            return !link.simulated && !link.is_simulated && !type.endsWith('_demo')
-          })
+        : links.filter((link) => !isSimulatedTopologyLink(link))
     }
 
     const topologyDisplayError = computed(() => (
