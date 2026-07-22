@@ -199,6 +199,7 @@ export default {
       trafficLevels,
       syncTopologyLinks,
       applyTopologyVisibility,
+      setSimulatedLinksVisible,
       clearTopologyLinks,
       destroyTopology
     } = useTopology(viewer)
@@ -226,6 +227,8 @@ export default {
     let lastOrbitUpdateIndex = -1
     let lastRealtimeTick = 0
 
+    setSimulatedLinksVisible(includeSimulatedLinks.value)
+
     watch(
       () => props.visibleNodeIds,
       (nodeIds) => {
@@ -252,15 +255,17 @@ export default {
 
     watch(topologyEnabled, (enabled) => {
       if (enabled) {
-        syncTopologyLinks(topologyState.liveLinks)
+        setSimulatedLinksVisible(includeSimulatedLinks.value)
+        syncTopologyLinks(filterVisibleTopologyLinks(topologyState.liveLinks))
         refreshTopologyLinks(displayTimeIndex.value)
       } else {
         clearTopologyLinks()
       }
     })
 
-    watch(includeSimulatedLinks, () => {
+    watch(includeSimulatedLinks, (visible) => {
       if (!topologyEnabled.value) return
+      setSimulatedLinksVisible(visible)
       syncTopologyLinks(filterVisibleTopologyLinks(topologyState.liveLinks))
       refreshTopologyLinks(displayTimeIndex.value)
     })
@@ -576,7 +581,10 @@ export default {
     function filterVisibleTopologyLinks(links = []) {
       return includeSimulatedLinks.value
         ? links
-        : links.filter((link) => !link.simulated)
+        : links.filter((link) => {
+            const type = String(link.link_type || link.type || '').toLowerCase()
+            return !link.simulated && !link.is_simulated && !type.endsWith('_demo')
+          })
     }
 
     const topologyDisplayError = computed(() => (
