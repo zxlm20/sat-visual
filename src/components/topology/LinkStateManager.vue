@@ -60,22 +60,24 @@
             </select>
           </label>
           <label>
-            <span>业务星座 ID</span>
-            <input
-              type="text"
-              placeholder="constellation-a"
+            <span>星座</span>
+            <select
               :value="state.filters.constellationId"
-              @input="updateFilter('constellationId', $event.target.value)"
-            />
+              @change="updateConstellationFilter($event.target.value)"
+            >
+              <option value="">全部星座</option>
+              <option v-for="group in constellationOptions" :key="group.constellation_id" :value="group.constellation_id">{{ group.constellation_name }}（{{ group.members?.length || 0 }}）</option>
+            </select>
           </label>
           <label>
             <span>节点 ID</span>
-            <input
-              type="text"
-              placeholder="M001001"
+            <select
               :value="state.filters.nodeId"
-              @input="updateFilter('nodeId', $event.target.value)"
-            />
+              @change="updateFilter('nodeId', $event.target.value)"
+            >
+              <option value="">全部节点</option>
+              <option v-for="nodeId in nodeFilterOptions" :key="nodeId" :value="nodeId">{{ nodeId }}</option>
+            </select>
           </label>
           <label>
             <span>链路类型</span>
@@ -284,11 +286,11 @@
           </div>
         </section>
 
-        <section class="detail-panel history-panel">
-          <div class="section-title">
+        <details class="detail-panel history-panel">
+          <summary class="section-title">
             <strong>链路历史回放</strong>
-            <span>GET /api/links/history</span>
-          </div>
+            <span>点击展开 / 收起 · GET /api/links/history</span>
+          </summary>
 
           <div v-if="state.historyError" class="notice warning" role="alert">
             {{ state.historyError }}
@@ -325,12 +327,13 @@
             </label>
             <label>
               <span>节点 ID</span>
-              <input
-                type="text"
-                placeholder="M001001"
+              <select
                 :value="state.historyFilters.nodeId"
-                @input="updateHistoryFilter('nodeId', $event.target.value)"
-              />
+                @change="updateHistoryFilter('nodeId', $event.target.value)"
+              >
+                <option value="">全部节点</option>
+                <option v-for="nodeId in allNodeOptions" :key="`history-${nodeId}`" :value="nodeId">{{ nodeId }}</option>
+              </select>
             </label>
             <label>
               <span>链路类型</span>
@@ -464,13 +467,13 @@
           <div v-else class="empty-box">
             输入时间范围后查询历史，可用滑块切换每一帧的动态链路状态
           </div>
-        </section>
+        </details>
 
-        <section class="detail-panel business-flow-panel">
-          <div class="section-title">
+        <details class="detail-panel business-flow-panel">
+          <summary class="section-title">
             <strong>最近推理业务流</strong>
-            <span>GET /api/links/business-flows</span>
-          </div>
+            <span>点击展开 / 收起 · GET /api/links/business-flows</span>
+          </summary>
 
           <div v-if="state.businessFlowError" class="notice warning" role="alert">
             {{ state.businessFlowError }}
@@ -590,13 +593,13 @@
           <div v-else class="empty-box">
             当前没有最近推理业务流，或后端暂未返回 dispatcher 最新任务
           </div>
-        </section>
+        </details>
 
-        <section class="detail-panel link-list-panel">
-          <div class="section-title">
+        <details class="detail-panel link-list-panel">
+          <summary class="section-title">
             <strong>链路列表</strong>
-            <span>{{ links.length }} 条</span>
-          </div>
+            <span>点击展开 / 收起 · {{ links.length }} 条</span>
+          </summary>
 
           <div class="link-table">
             <div class="link-row head">
@@ -647,7 +650,7 @@
           <div v-if="!state.loadingStatus && links.length === 0" class="empty-box">
             当前筛选条件下暂无链路
           </div>
-        </section>
+        </details>
 
         <section class="detail-panel detail-view">
           <div class="section-title">
@@ -719,6 +722,7 @@
 <script>
 import { computed, onBeforeUnmount, onMounted } from 'vue'
 import { useLinkStateStore } from '@/store/linkStateStore'
+import { useConstellationGroupStore } from '@/store/constellationGroupStore'
 
 const COLOR_LEVELS = ['#94a3b8', '#38ffb7', '#52c4ff', '#ffd86b', '#ff9f43', '#ff4d6d']
 const CONGESTION_LABELS = {
@@ -739,6 +743,10 @@ export default {
     }
   },
   setup() {
+    const {
+      state: constellationState,
+      fetchGroups: fetchConstellationGroups
+    } = useConstellationGroupStore()
     const {
       state,
       links,
@@ -865,6 +873,36 @@ export default {
       })
     ))
 
+    const constellationOptions = computed(() => constellationState.groups || [])
+    const allNodeOptions = computed(() => {
+      const ids = new Set()
+      links.value.forEach((link) => {
+        if (link.source) ids.add(String(link.source))
+        if (link.target) ids.add(String(link.target))
+      })
+      ;(snapshot.value?.nodes || []).forEach((node) => {
+        const id = node.id || node.node_id
+        if (id) ids.add(String(id))
+      })
+      constellationOptions.value.forEach((group) => {
+        (group.members || []).forEach((nodeId) => ids.add(String(nodeId)))
+      })
+      return [...ids].sort((left, right) => left.localeCompare(right))
+    })
+    const nodeFilterOptions = computed(() => {
+      const group = constellationOptions.value.find(
+        (item) => item.constellation_id === state.filters.constellationId
+      )
+      const members = new Set((group?.members || []).map(String))
+      const orbitLayer = String(state.filters.orbitLayer || '').toUpperCase()
+      return allNodeOptions.value.filter((nodeId) => {
+        if (group && !members.has(nodeId)) return false
+        if (!orbitLayer) return true
+        if (orbitLayer === 'GROUND') return nodeId.toLowerCase().startsWith('ground')
+        return ({ LEO: 'L', MEO: 'M', HEO: 'H' })[orbitLayer] === nodeId.charAt(0).toUpperCase()
+      })
+    })
+
     const refreshStatus = async () => {
       try {
         await fetchStatus()
@@ -922,6 +960,10 @@ export default {
 
     const updateFilter = (name, value) => {
       updateFilters({ [name]: value })
+    }
+
+    const updateConstellationFilter = (value) => {
+      updateFilters({ constellationId: value, nodeId: '' })
     }
 
     const updateHistoryFilter = (name, value) => {
@@ -1046,6 +1088,7 @@ export default {
     const formatJson = (value) => JSON.stringify(value || {}, null, 2)
 
     onMounted(() => {
+      fetchConstellationGroups().catch(() => {})
       refreshStatus().then(() => {
         if (state.selectedLinkId) openLinkDetail({ id: state.selectedLinkId })
       })
@@ -1073,6 +1116,9 @@ export default {
       selectedHistoryLinks,
       historyFramePreview,
       businessFlowSummary,
+      constellationOptions,
+      allNodeOptions,
+      nodeFilterOptions,
       refreshStatus,
       refreshThresholds,
       saveThresholdDraft,
@@ -1082,6 +1128,7 @@ export default {
       resetHistoryAndQuery,
       resetAndRefresh,
       updateFilter,
+      updateConstellationFilter,
       updateHistoryFilter,
       selectHistoryFrame,
       updateThresholdValue,
@@ -1273,6 +1320,33 @@ button.secondary {
 .section-title span {
   color: rgba(201, 255, 247, .56);
   font-size: 11px;
+}
+
+details > summary.section-title {
+  margin: 0;
+  padding: 3px 0;
+  cursor: pointer;
+  list-style: none;
+}
+
+details > summary.section-title::-webkit-details-marker {
+  display: none;
+}
+
+details > summary.section-title strong::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 7px;
+  color: #38ffb7;
+  transition: transform .16s ease;
+}
+
+details[open] > summary.section-title {
+  margin-bottom: 12px;
+}
+
+details[open] > summary.section-title strong::before {
+  transform: rotate(90deg);
 }
 
 .filter-grid {

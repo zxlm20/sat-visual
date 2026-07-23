@@ -157,6 +157,7 @@ function buildTopologyQuery(options = {}) {
     params.set('time_index', String(Math.max(0, Math.round(Number(options.timeIndex) || 0))))
   }
   if (options.orbitLayer) params.set('orbit_layer', options.orbitLayer)
+  if (options.constellationId) params.set('constellation_id', options.constellationId)
   if (options.includeSimulatedLinks !== undefined) {
     params.set('include_simulated_links', String(Boolean(options.includeSimulatedLinks)))
   }

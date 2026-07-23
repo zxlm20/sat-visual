@@ -272,14 +272,6 @@
             </div>
           </section>
 
-          <section class="detail-panel payload-panel">
-            <div class="section-title">
-              <strong>待提交 JSON</strong>
-              <span>保持原始类型</span>
-            </div>
-            <pre>{{ previewJson }}</pre>
-          </section>
-
           <section class="detail-panel result-panel">
             <div class="section-title">
               <strong>最近有效调度结果</strong>
@@ -455,11 +447,6 @@ export default {
       }
     })
 
-    const previewJson = computed(() => JSON.stringify({
-      algorithm_id: selectedAlgorithm.value?.algorithm_id || '',
-      parameters: normalizedPreview.value
-    }, null, 2))
-
     const waitableRevision = computed(() => (
       state.lastAppliedRevision || desired.value?.revision || null
     ))
@@ -618,7 +605,6 @@ export default {
       error,
       actionNotice,
       parameterEntries,
-      previewJson,
       waitableRevision,
       runtimeStateClass,
       revisionMatchText,

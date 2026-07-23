@@ -311,11 +311,21 @@
             <div><span>任务队列</span><strong>{{ formatInteger(resourceMetrics.task_queue_len) }}</strong></div>
           </div>
 
-          <div v-if="resourceMetrics" class="npu-grid">
-            <div><span>NPU AI Core</span><strong>{{ formatCollectedPercent(resourceMetrics.npu_ai_core_percent) }}</strong></div>
-            <div><span>NPU 内存</span><strong>{{ formatCollectedPercent(resourceMetrics.npu_memory_percent) }}</strong></div>
-            <div><span>NPU 温度</span><strong>{{ formatCollectedValue(resourceMetrics.npu_temperature_celsius, '°C') }}</strong></div>
-            <div><span>NPU 功率</span><strong>{{ formatCollectedValue(resourceMetrics.npu_power_watts, 'W') }}</strong></div>
+          <div v-if="resourceMetrics" class="npu-status" :class="npuStatusClass">
+            <strong>NPU 采集状态：{{ npuStatusText }}</strong>
+            <span v-if="resourceMetrics.npu_metrics_stale">数据年龄 {{ formatCollectedValue(resourceMetrics.npu_metrics_age_seconds, '秒') }}</span>
+          </div>
+          <div v-if="resourceMetrics && resourceMetrics.npu_expected" class="npu-grid">
+            <div><span>NPU 芯片数</span><strong>{{ formatInteger(resourceMetrics.npu_chip_count) }}</strong></div>
+            <div><span>NPU 健康度</span><strong>{{ formatNpuHealth(resourceMetrics.npu_health_ok) }}</strong></div>
+            <div><span>NPU AI Core</span><strong>{{ formatNpuPercent(resourceMetrics.npu_ai_core_percent) }}</strong></div>
+            <div><span>NPU AI CPU</span><strong>{{ formatNpuPercent(resourceMetrics.npu_ai_cpu_percent) }}</strong></div>
+            <div><span>NPU 控制 CPU</span><strong>{{ formatNpuPercent(resourceMetrics.npu_control_cpu_percent) }}</strong></div>
+            <div><span>NPU 内存</span><strong>{{ formatNpuPercent(resourceMetrics.npu_memory_percent) }}</strong></div>
+            <div><span>NPU 内存带宽</span><strong>{{ formatNpuPercent(resourceMetrics.npu_memory_bandwidth_percent) }}</strong></div>
+            <div><span>NPU 内存用量</span><strong>{{ formatNpuMemory }}</strong></div>
+            <div><span>NPU 温度</span><strong>{{ formatNpuValue(resourceMetrics.npu_temperature_celsius, '°C') }}</strong></div>
+            <div><span>NPU 功率</span><strong>{{ formatNpuValue(resourceMetrics.npu_power_watts, 'W') }}</strong></div>
           </div>
 
           <div class="history-section">
@@ -350,7 +360,7 @@
 
       <div v-if="selectedNode.has_node_model" class="model-management">
         <div class="management-toolbar">
-          <button type="button" @click="editMode = !editMode">
+          <button type="button" @click="toggleEditMode">
             {{ editMode ? '取消编辑' : '编辑节点档案' }}
           </button>
           <button type="button" :disabled="nodeModelState.saving" @click="allocateIpNow">
@@ -381,8 +391,8 @@
           <div v-if="nodeModelState.ipCheck" class="ip-check-result" :class="{ valid: nodeModelState.ipCheck.valid && !nodeModelState.ipCheck.conflict }">
             {{ formatIpCheck(nodeModelState.ipCheck) }}
           </div>
-          <label><span>物理节点</span><input v-model.trim="modelForm.physical_node" type="text" /></label>
-          <label><span>物理 IPv4</span><input v-model.trim="modelForm.physical_ipv4" type="text" /></label>
+          <label><span>物理节点</span><select v-model="modelForm.physical_node" @change="selectPhysicalNode"><option value="">请选择物理节点</option><option v-for="node in physicalNodeOptions" :key="node.physical_node" :value="node.physical_node">{{ node.physical_node }} · {{ node.physical_ipv4 || 'IP 未知' }}{{ node.bound_node_id && node.bound_node_id !== selectedNode.node_id ? ` · 已绑定 ${node.bound_node_id}` : '' }}</option></select></label>
+          <label><span>物理 IPv4（自动带入）</span><input v-model.trim="modelForm.physical_ipv4" type="text" readonly /></label>
           <label><span>绑定角色</span><input v-model.trim="modelForm.binding_role" type="text" /></label>
           <button type="button" class="primary" :disabled="nodeModelState.saving" @click="saveModelNow">
             保存节点档案
@@ -444,6 +454,8 @@ export default {
     } = useNodeModelStore()
     const {
       state: nodeResourceState,
+      fetchResourceService,
+      fetchNodeResources,
       fetchResourceDetail,
       fetchResourceHistories
     } = useResourceStore()
@@ -462,6 +474,8 @@ export default {
       saveNodeBinding: saveBinding,
       removeNodeBinding: removeBinding,
       nodeResourceState,
+      fetchResourceService,
+      fetchNodeResources,
       fetchNodeResource: fetchResourceDetail,
       fetchNodeResourceHistories: fetchResourceHistories,
       nodeLoadState,
@@ -618,11 +632,20 @@ export default {
       return `${step} 秒${isLocal ? '本地' : '后端'}采样`
     },
     historyCharts() {
-      return [
+      const definitions = [
         { metric: 'cpu_percent', label: 'CPU', color: '#38ffb7' },
         { metric: 'memory_percent', label: '内存', color: '#52c4ff' },
         { metric: 'disk_root_percent', label: '磁盘', color: '#ffb657' }
-      ].map((chart) => {
+      ]
+      if (this.resourceMetrics?.npu_expected || this.resourceMetrics?.npu_metrics_available) {
+        definitions.push(
+          { metric: 'npu_ai_core_percent', label: 'NPU AI Core', color: '#b694ff' },
+          { metric: 'npu_memory_percent', label: 'NPU 内存', color: '#ff74cf' },
+          { metric: 'npu_temperature_celsius', label: 'NPU 温度', color: '#ff916c', unit: '°C' },
+          { metric: 'npu_power_watts', label: 'NPU 功率', color: '#ffe56c', unit: 'W' }
+        )
+      }
+      return definitions.map((chart) => {
         const history = this.nodeResourceState.histories?.[chart.metric] || {}
         const points = history.points || []
         const values = points
@@ -632,7 +655,7 @@ export default {
         return {
           ...chart,
           polyline: this.buildHistoryPolyline(points),
-          latest: values.length ? `${values[values.length - 1].toFixed(1)}%` : '-',
+          latest: values.length ? `${values[values.length - 1].toFixed(1)}${chart.unit || '%'}` : '-',
           pointCount: values.length,
           sourceLabel: history.stale ? '后端历史（上次成功）' : ({
             backend: '后端历史',
@@ -646,6 +669,53 @@ export default {
             : (history.source === 'unavailable' ? '后端历史不可用，本地采样正在等待首个时间点' : '暂无历史采样')
         }
       })
+    },
+    npuStatusClass() {
+      if (!this.resourceMetrics?.npu_expected) return 'not-expected'
+      if (this.resourceMetrics.npu_health_ok === false) return 'critical'
+      if (this.resourceMetrics.npu_metrics_available !== true || this.resourceMetrics.npu_metrics_stale) return 'warning'
+      return 'normal'
+    },
+    npuStatusText() {
+      if (!this.resourceMetrics?.npu_expected) return '该物理节点未配置 NPU'
+      if (this.resourceMetrics.npu_metrics_available !== true) return 'NPU 指标不可用'
+      if (this.resourceMetrics.npu_metrics_stale) return 'NPU 指标已过期'
+      if (this.resourceMetrics.npu_collector_success === false) return 'NPU 采集器异常'
+      return '采集正常'
+    },
+    formatNpuMemory() {
+      if (this.resourceMetrics?.npu_metrics_available !== true) return '不可用'
+      return `${this.formatBytes(this.resourceMetrics.npu_memory_used_bytes)} / ${this.formatBytes(this.resourceMetrics.npu_memory_total_bytes)}`
+    },
+    physicalNodeOptions() {
+      const nodes = new Map()
+      const put = (physicalNode, physicalIpv4 = '', boundNodeId = '') => {
+        const id = String(physicalNode || '').trim()
+        if (!id) return
+        const current = nodes.get(id) || { physical_node: id, physical_ipv4: '', bound_node_id: '' }
+        nodes.set(id, {
+          physical_node: id,
+          physical_ipv4: physicalIpv4 || current.physical_ipv4,
+          bound_node_id: boundNodeId || current.bound_node_id
+        })
+      }
+      this.nodeResourceState.nodes.forEach((node) => {
+        put(
+          node.physical_node || node.physical_node_id || node.worker_node || node.node,
+          node.physical_ipv4 || node.ipv4 || ''
+        )
+      })
+      ;(this.nodeResourceState.status?.node_exporter_targets || []).forEach((target) => {
+        const instance = String(target.instance || '')
+        put(target.node || target.node_id || target.name, instance.replace(/:\d+$/, ''))
+      })
+      this.nodeModelState.bindings.forEach((binding) => {
+        put(binding.physical_node, binding.physical_ipv4, binding.node_id)
+      })
+      put(this.selectedNode?.physical_node, this.selectedNode?.physical_ipv4, this.selectedNode?.node_id)
+      return [...nodes.values()].sort((left, right) => (
+        String(left.physical_node).localeCompare(String(right.physical_node))
+      ))
     }
   },
   watch: {
@@ -673,6 +743,14 @@ export default {
     }
   },
   methods: {
+    async toggleEditMode() {
+      this.editMode = !this.editMode
+      if (!this.editMode) return
+      await Promise.allSettled([
+        this.fetchResourceService(),
+        this.fetchNodeResources()
+      ])
+    },
     async refreshLoadNow() {
       if (!this.selectedNode?.node_id || !this.selectedNode?.physical_node) return
       try {
@@ -703,6 +781,21 @@ export default {
     },
     formatCollectedValue(value, unit) {
       return this.hasNumericValue(value) ? `${Number(value).toFixed(1)} ${unit}` : '未采集'
+    },
+    formatNpuPercent(value) {
+      return this.resourceMetrics?.npu_metrics_available === true
+        ? this.formatCollectedPercent(value)
+        : '不可用'
+    },
+    formatNpuValue(value, unit) {
+      return this.resourceMetrics?.npu_metrics_available === true
+        ? this.formatCollectedValue(value, unit)
+        : '不可用'
+    },
+    formatNpuHealth(value) {
+      if (this.resourceMetrics?.npu_metrics_available !== true) return '不可用'
+      if (value === null || value === undefined) return '未采集'
+      return value ? '健康' : '异常'
     },
     formatNumber(value) {
       return this.hasNumericValue(value) ? Number(value).toFixed(2) : '未采集'
@@ -813,10 +906,7 @@ export default {
         await this.saveNodeModel(this.selectedNode.node_id, {
           node_name: this.optional(this.modelForm.node_name),
           logical_ipv4: this.optional(this.modelForm.logical_ipv4),
-          logical_ipv6: this.optional(this.modelForm.logical_ipv6),
-          physical_node: this.optional(this.modelForm.physical_node),
-          physical_ipv4: this.optional(this.modelForm.physical_ipv4),
-          binding_role: this.optional(this.modelForm.binding_role)
+          logical_ipv6: this.optional(this.modelForm.logical_ipv6)
         })
         this.editMode = false
         this.showFeedback('节点档案已保存', 'success')
@@ -872,15 +962,36 @@ export default {
     async saveBindingNow() {
       if (!this.selectedNode?.node_id || !this.modelForm.physical_node) return
       try {
+        const occupiedBindings = this.nodeModelState.bindings.filter((binding) => (
+          binding.physical_node === this.modelForm.physical_node &&
+          binding.node_id !== this.selectedNode.node_id
+        ))
+        if (occupiedBindings.length) {
+          const occupiedNodeIds = occupiedBindings.map((binding) => binding.node_id).join('、')
+          if (!window.confirm(
+            `物理节点 ${this.modelForm.physical_node} 当前已绑定 ${occupiedNodeIds}，是否解除原绑定并切换到 ${this.selectedNode.node_id}？`
+          )) return
+          for (const binding of occupiedBindings) {
+            await this.removeNodeBinding(binding.node_id)
+          }
+        }
         await this.saveNodeBinding({
           node_id: this.selectedNode.node_id,
           physical_node: this.modelForm.physical_node,
           physical_ipv4: this.optional(this.modelForm.physical_ipv4),
           binding_role: this.optional(this.modelForm.binding_role)
         })
-      } catch (_) {
-        // 错误由共享状态显示。
+        this.showFeedback(`已将 ${this.selectedNode.node_id} 绑定到 ${this.modelForm.physical_node}`, 'success')
+      } catch (error) {
+        this.showFeedback(error?.message || this.nodeModelState.error || '保存物理绑定失败', 'error')
       }
+    },
+    selectPhysicalNode() {
+      const selected = this.physicalNodeOptions.find(
+        (node) => node.physical_node === this.modelForm.physical_node
+      )
+      this.modelForm.physical_ipv4 = selected?.physical_ipv4 || ''
+      if (!this.modelForm.binding_role) this.modelForm.binding_role = 'edge-worker'
     },
     async removeBindingNow() {
       if (!this.selectedNode?.node_id) return
@@ -1394,6 +1505,38 @@ button:disabled {
   border-radius: 5px;
   font-size: 11px;
   line-height: 1.65;
+}
+
+.npu-status {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 8px 9px;
+  color: #cffff0;
+  background: rgba(56, 255, 183, .06);
+  border: 1px solid rgba(56, 255, 183, .22);
+  border-radius: 5px;
+  font-size: 10px;
+}
+
+.npu-status.warning,
+.npu-status.critical {
+  color: #ffe0a2;
+  background: rgba(255, 184, 77, .07);
+  border-color: rgba(255, 184, 77, .3);
+}
+
+.npu-status.critical {
+  color: #ffbdc9;
+  background: rgba(255, 77, 109, .07);
+  border-color: rgba(255, 77, 109, .3);
+}
+
+.npu-status.not-expected {
+  color: rgba(201, 255, 247, .56);
+  background: rgba(2, 12, 20, .56);
+  border-color: rgba(82, 196, 255, .16);
 }
 
 .resource-error {

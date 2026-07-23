@@ -302,6 +302,13 @@
               <small>{{ target.instance || '实例地址未知' }} · value={{ target.value ?? '未返回' }}</small>
             </span>
           </div>
+          <div v-if="npuCollectorTargets.length" class="resource-targets npu-targets">
+            <strong>NPU 采集器</strong>
+            <span v-for="(target, index) in npuCollectorTargets" :key="`npu-${target.instance || target.node || index}`" :class="{ online: target.up }">
+              <b>{{ target.node || target.instance }} · {{ formatTargetStatus(target.up) }}</b>
+              <small>{{ target.instance || '实例地址未知' }} · value={{ target.value ?? '未返回' }}</small>
+            </span>
+          </div>
           <details v-if="resourceState.metrics.length || resourceState.metricsNote" class="resource-metric-catalog">
             <summary>查看支持的资源指标（{{ resourceState.metrics.length }} 项）</summary>
             <div>
@@ -333,7 +340,7 @@
           >
             <span>
               <strong>{{ resource.node_id || resource.logical_node_id || resource.physical_node }}</strong>
-              <small>{{ resource.physical_node || '物理节点' }} · {{ formatResourceAlarm(resource.alarm_level) }}</small>
+              <small>{{ resource.physical_node || '物理节点' }} · {{ formatResourceAlarm(resource.alarm_level) }} · NPU {{ formatNpuAvailability(resource) }}</small>
             </span>
             <span><small>CPU</small><strong>{{ formatResourcePercent(resource.cpu_percent) }}</strong></span>
             <span><small>内存</small><strong>{{ formatResourcePercent(resource.memory_percent) }}</strong></span>
@@ -447,7 +454,7 @@
             @click="selectTopologyView('dynamic')"
           >
             <strong>动态拓扑</strong>
-            <small>3.6 几何可见性、历史与规则</small>
+            <small>几何可见性、历史与规则</small>
           </button>
           <button
             type="button"
@@ -457,7 +464,7 @@
             @click="selectTopologyView('links')"
           >
             <strong>链路状态</strong>
-            <small>3.7 拥塞、阈值、历史和业务流</small>
+            <small>拥塞、阈值、历史和业务流</small>
           </button>
         </div>
 
@@ -472,12 +479,13 @@
           <button type="button" @click="loadTopology">
             {{ topologyState.loading ? '刷新中...' : '刷新二维拓扑' }}
           </button>
-          <span>{{ topologyState.nodes.length }} 节点 / {{ topologyLinks.length }} 链路</span>
+          <span>{{ topologyNodes.length }} 节点 / {{ topologyLinks.length }} 链路</span>
         </div>
 
         <div class="topology-controls">
-          <label><span>星历序号（1点/分钟）</span><input v-model.number="topologyTimeIndex" type="number" min="0" max="20160" step="1" /></label>
+          <label><span>星历时间序号（0 为起点，每 1 表示 1 分钟）</span><input v-model.number="topologyTimeIndex" type="number" min="0" max="20160" step="1" /></label>
           <label><span>轨道层</span><select v-model="topologyOrbitLayer"><option value="">全部轨道层</option><option value="LEO">低轨 LEO</option><option value="MEO">中轨 MEO</option><option value="HEO">高轨 HEO</option></select></label>
+          <label><span>星座</span><select v-model="topologyConstellationId"><option value="">全部星座</option><option v-for="group in constellationFilterOptions" :key="`topology-${group.constellation_id}`" :value="group.constellation_id">{{ group.constellation_name }}（{{ group.members?.length || 0 }}）</option></select></label>
           <label class="topology-simulated"><input v-model="topologyIncludeSimulated" type="checkbox" />显示演示链路</label>
         </div>
 
@@ -615,7 +623,7 @@
         <div class="summary-card">
           <span>节点负载评分</span>
           <strong>{{ loadState.nodes.length }} 个实时负载节点</strong>
-          <p>这里的“权重”只用于计算节点负载分数，不是任务调度算法参数。系统综合 CPU、内存、磁盘、NPU、任务队列和可用性，按六档展示节点压力。</p>
+          <p>“综合负载”是调度用的加权分数；“资源告警”是单项 CPU、内存、磁盘或 NPU 越线的安全提示。两者判断方式不同，因此会同时显示。</p>
         </div>
 
         <div class="task-toolbar">
@@ -635,7 +643,7 @@
 
         <div class="load-node-list">
           <button
-            v-for="node in loadState.nodes"
+            v-for="node in loadDisplayNodes"
             :key="`${node.node_id}-${node.physical_node}`"
             type="button"
             class="load-node-card"
@@ -643,7 +651,8 @@
           >
             <i :style="{ background: node.color }"></i>
             <span><strong>{{ node.node_id }}</strong><small>{{ node.physical_node || '未绑定物理节点' }}</small></span>
-            <b>{{ node.level_label || node.label }}<small>{{ Number(node.score || 0).toFixed(1) }}</small></b>
+            <b>综合负载：{{ node.level_label || node.label }}<small>评分 {{ Number(node.score || 0).toFixed(1) }}</small></b>
+            <b :class="['resource-alarm-text', node.resource_alarm_level]">资源：{{ formatResourceAlarm(node.resource_alarm_level) }}<small>{{ node.resource_alarm_reason }}</small></b>
           </button>
           <div v-if="!loadState.nodes.length && !loadState.loading" class="empty-box">暂无负载节点</div>
         </div>
@@ -809,6 +818,7 @@ export default {
     const syncBindDemoWorkers = ref(true)
     const topologyTimeIndex = ref(0)
     const topologyOrbitLayer = ref('')
+    const topologyConstellationId = ref('')
     const topologyIncludeSimulated = ref(true)
     const topologyView = ref('map')
     const poolLayers = ['GROUND', 'LEO', 'MEO', 'HEO']
@@ -950,6 +960,7 @@ export default {
     }
 
     const resourceTargets = computed(() => resourceState.status?.node_exporter_targets || [])
+    const npuCollectorTargets = computed(() => resourceState.status?.npu_collectors || [])
     const resourceOnlineTargetCount = computed(() => (
       resourceTargets.value.filter((target) => target.up === true).length
     ))
@@ -1002,6 +1013,7 @@ export default {
         await fetchTopology({
           timeIndex: topologyTimeIndex.value,
           orbitLayer: topologyOrbitLayer.value,
+          constellationId: topologyConstellationId.value,
           includeSimulatedLinks: topologyIncludeSimulated.value
         })
       } catch (error) {
@@ -1009,6 +1021,36 @@ export default {
         operationNotice.message = error?.message || '读取网络拓扑失败'
       }
     }
+
+    const formatNpuAvailability = (resource) => {
+      if (!resource?.npu_expected) return '未配置'
+      if (resource.npu_metrics_available !== true) return '不可用'
+      if (resource.npu_metrics_stale) return '数据过期'
+      return `${formatResourcePercent(resource.npu_ai_core_percent)} AI Core`
+    }
+
+    const loadDisplayNodes = computed(() => loadState.nodes.map((node) => {
+      const resource = getResourceByNode(node.node_id, node.physical_node)
+      let reason = '各项资源未越线'
+      if (resource?.online === false) reason = '节点离线'
+      else if (resource?.npu_expected && resource?.npu_metrics_available !== true) reason = 'NPU 指标不可用'
+      else if (resource?.npu_metrics_stale) reason = 'NPU 指标已过期'
+      else {
+        const entries = [
+          ['CPU', resource?.cpu_percent],
+          ['内存', resource?.memory_percent],
+          ['磁盘', resource?.disk_root_percent],
+          ['NPU', resource?.npu_ai_core_percent]
+        ].filter(([, value]) => Number.isFinite(Number(value)))
+        const peak = entries.sort((left, right) => Number(right[1]) - Number(left[1]))[0]
+        if (peak && Number(peak[1]) >= 75) reason = `${peak[0]} ${Number(peak[1]).toFixed(1)}%`
+      }
+      return {
+        ...node,
+        resource_alarm_level: resource?.alarm_level || 'unknown',
+        resource_alarm_reason: resource ? reason : '暂无资源数据'
+      }
+    }))
 
     const selectTopologyView = (view) => {
       topologyView.value = view
@@ -1534,7 +1576,7 @@ export default {
     const heoNodeCount = computed(() => (
       allNodeDirectory.value.filter((node) => node.directoryLayer === 'HEO').length
     ))
-    const topologyNodes = computed(() => {
+    const rawTopologyNodes = computed(() => {
       return topologyState.nodes.map((node) => {
         const isGround = node.type === 'ground'
         const longitude = Number(node.layout?.x ?? node.x ?? node.geo?.lon_deg ?? 0)
@@ -1555,8 +1597,46 @@ export default {
         }
       })
     })
+    const topologyNodes = computed(() => {
+      const orbitLayer = String(topologyOrbitLayer.value || '').toUpperCase()
+      const constellationId = topologyConstellationId.value
+      if (!orbitLayer && !constellationId) return rawTopologyNodes.value
+
+      const selectedGroup = constellationGroupState.groups.find(
+        (group) => group.constellation_id === constellationId
+      )
+      const memberIds = new Set((selectedGroup?.members || []).map(String))
+      const selectedSatelliteIds = new Set(rawTopologyNodes.value
+        .filter((node) => {
+          if (node.type === 'ground' || node.node_type === 'ground') return false
+          const nodeLayer = String(node.orbit_layer || '').toUpperCase() || ({ L: 'LEO', M: 'MEO', H: 'HEO' })[String(node.id || '').charAt(0).toUpperCase()]
+          if (orbitLayer && nodeLayer !== orbitLayer) return false
+          if (constellationId && !memberIds.has(String(node.id || node.node_id || ''))) return false
+          return true
+        })
+        .map((node) => String(node.id || node.node_id || '')))
+
+      if (!selectedSatelliteIds.size) return []
+      const connectedGroundIds = new Set()
+      topologyState.links.forEach((link) => {
+        const source = String(link.source || '')
+        const target = String(link.target || '')
+        if (selectedSatelliteIds.has(source)) connectedGroundIds.add(target)
+        if (selectedSatelliteIds.has(target)) connectedGroundIds.add(source)
+      })
+      return rawTopologyNodes.value.filter((node) => {
+        const id = String(node.id || node.node_id || '')
+        return selectedSatelliteIds.has(id) || (
+          (node.type === 'ground' || node.node_type === 'ground') && connectedGroundIds.has(id)
+        )
+      })
+    })
     const topologyLinks = computed(() => topologyState.links
       .filter((link) => topologyIncludeSimulated.value || !link.simulated)
+      .filter((link) => {
+        const visibleNodeIds = new Set(topologyNodes.value.map((node) => node.id))
+        return visibleNodeIds.has(link.source) && visibleNodeIds.has(link.target)
+      })
       .map((link) => {
       const source = topologyNodes.value.find((node) => node.id === link.source)
       const target = topologyNodes.value.find((node) => node.id === link.target)
@@ -1615,6 +1695,9 @@ export default {
           })
         }
         if (id === 'topology') {
+          if (!constellationGroupState.groups.length && !constellationGroupState.loading) {
+            fetchConstellationGroups().catch(() => {})
+          }
           if (['map', 'dynamic', 'links'].includes(requestedTopologyView)) {
             topologyView.value = requestedTopologyView
           }
@@ -1650,10 +1733,13 @@ export default {
       nodeModelState,
       resourceState,
       resourceTargets,
+      npuCollectorTargets,
       resourceOnlineTargetCount,
       resourceServiceStatusText,
       refreshResourceService,
       formatResourcePercent,
+      formatNpuAvailability,
+      loadDisplayNodes,
       formatTargetStatus,
       formatResourceAlarm,
       formatResourceUpdateTime,
@@ -1682,6 +1768,7 @@ export default {
       formatTopologyEndpoint,
       topologyTimeIndex,
       topologyOrbitLayer,
+      topologyConstellationId,
       topologyIncludeSimulated,
       topologyView,
       selectTopologyView,
@@ -2159,7 +2246,7 @@ h2 {
 
 .load-node-card {
   display: grid;
-  grid-template-columns: 8px minmax(0, 1fr) auto;
+  grid-template-columns: 8px minmax(0, 1fr) minmax(92px, auto) minmax(92px, auto);
   align-items: center;
   gap: 9px;
   width: 100%;
@@ -2209,6 +2296,19 @@ h2 {
   color: #eaffff;
   font-size: 10px;
   text-align: right;
+}
+
+.load-node-card > .resource-alarm-text.warning {
+  color: #ffcb77;
+}
+
+.load-node-card > .resource-alarm-text.critical,
+.load-node-card > .resource-alarm-text.offline {
+  color: #ff8298;
+}
+
+.load-node-card > .resource-alarm-text.unknown {
+  color: rgba(201, 255, 247, .5);
 }
 
 .threshold-section {
@@ -2667,6 +2767,12 @@ h2 {
   display: flex;
   flex-wrap: wrap;
   gap: 5px;
+}
+
+.resource-targets.npu-targets > strong {
+  flex: 0 0 100%;
+  color: #b694ff;
+  font-size: 10px;
 }
 
 .resource-targets span {

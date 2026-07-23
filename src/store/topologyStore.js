@@ -40,10 +40,17 @@ const state = reactive({
   linksError: '',
   updateTime: null,
   threeDUpdateTime: null,
-  linksUpdateTime: null
+  linksUpdateTime: null,
+  twoDOptions: {
+    timeIndex: 0,
+    orbitLayer: '',
+    constellationId: '',
+    includeSimulatedLinks: true
+  }
 })
 
 let twoDRequest = null
+let pendingTwoDOptions = null
 let threeDRequest = null
 let linksRequest = null
 let pendingLinksOptions = null
@@ -164,9 +171,28 @@ async function loadTopology(options = {}) {
   }
 }
 
-function fetchTopology(options = {}) {
-  if (twoDRequest) return twoDRequest
-  twoDRequest = loadTopology(options).finally(() => { twoDRequest = null })
+function fetchTopology(options) {
+  const resolvedOptions = options === undefined
+    ? { ...state.twoDOptions }
+    : {
+        timeIndex: Number(options.timeIndex || 0),
+        orbitLayer: String(options.orbitLayer || '').toUpperCase(),
+        constellationId: String(options.constellationId || ''),
+        includeSimulatedLinks: options.includeSimulatedLinks !== false
+      }
+  if (options !== undefined) state.twoDOptions = resolvedOptions
+  if (twoDRequest) {
+    pendingTwoDOptions = resolvedOptions
+    return twoDRequest
+  }
+  twoDRequest = loadTopology(resolvedOptions).finally(() => {
+    twoDRequest = null
+    if (pendingTwoDOptions) {
+      const nextOptions = pendingTwoDOptions
+      pendingTwoDOptions = null
+      fetchTopology(nextOptions).catch(() => {})
+    }
+  })
   return twoDRequest
 }
 

@@ -7,11 +7,26 @@ import {
   getResourceStatus
 } from '@/api/backend'
 
-const DEFAULT_HISTORY_METRICS = [
+const BASE_HISTORY_METRICS = [
   'cpu_percent',
   'memory_percent',
   'disk_root_percent'
 ]
+
+const NPU_HISTORY_METRICS = [
+  'npu_ai_core_percent',
+  'npu_ai_cpu_percent',
+  'npu_control_cpu_percent',
+  'npu_memory_percent',
+  'npu_memory_bandwidth_percent',
+  'npu_memory_used_bytes',
+  'npu_temperature_celsius',
+  'npu_power_watts',
+  'npu_health_ok',
+  'npu_collector_success'
+]
+
+const LOCAL_HISTORY_METRICS = [...BASE_HISTORY_METRICS, ...NPU_HISTORY_METRICS]
 
 const LOCAL_HISTORY_RANGE_SECONDS = 3600
 
@@ -73,6 +88,7 @@ function normalizeStatus(data) {
     ? { ...data, ...data.status }
     : (data || {})
   const targets = source.node_exporter_targets || source.targets || source.exporter_targets || []
+  const npuCollectors = source.npu_collectors || source.npu_targets || []
   const readyValue = source.ready ?? source.prometheus_ready ?? source.available
   const statusValue = String(source.status || '').toLowerCase()
   const normalizedReady = readyValue === undefined
@@ -81,7 +97,8 @@ function normalizeStatus(data) {
   return {
     ...source,
     ready: normalizedReady,
-    node_exporter_targets: Array.isArray(targets) ? targets.map(normalizeTarget) : []
+    node_exporter_targets: Array.isArray(targets) ? targets.map(normalizeTarget) : [],
+    npu_collectors: Array.isArray(npuCollectors) ? npuCollectors.map(normalizeTarget) : []
   }
 }
 
@@ -118,6 +135,11 @@ function normalizeResourceNode(node) {
     online,
     k8s_ready: normalizeOptionalBoolean(node.k8s_ready ?? status.k8s_ready),
     worker_ready: normalizeOptionalBoolean(node.worker_ready ?? status.worker_ready),
+    npu_expected: normalizeOptionalBoolean(merged.npu_expected),
+    npu_metrics_available: normalizeOptionalBoolean(merged.npu_metrics_available),
+    npu_metrics_stale: normalizeOptionalBoolean(merged.npu_metrics_stale),
+    npu_collector_success: normalizeNpuFlag(merged.npu_collector_success),
+    npu_health_ok: normalizeNpuFlag(merged.npu_health_ok),
     task_queue_len: node.task_queue_len ?? status.task_queue_len,
     alarm_level: deriveAlarmLevel(merged, status, online)
   }
@@ -127,10 +149,15 @@ function normalizeOptionalBoolean(value) {
   return value === null || value === undefined ? value : toBoolean(value)
 }
 
+function normalizeNpuFlag(value) {
+  if (value === null || value === undefined || value === '') return value
+  const numeric = Number(value)
+  return Number.isFinite(numeric) ? numeric >= 1 : toBoolean(value)
+}
+
 function deriveAlarmLevel(node, status, online) {
   if (online === false) return 'offline'
   const explicit = String(node.alarm_level || status.alarm_level || '').toLowerCase()
-  if (['normal', 'warning', 'critical', 'offline'].includes(explicit)) return explicit
   const percentages = [
     node.cpu_percent,
     node.memory_percent,
@@ -140,9 +167,27 @@ function deriveAlarmLevel(node, status, online) {
   ].filter((value) => (
     value !== null && value !== undefined && value !== '' && Number.isFinite(Number(value))
   )).map(Number)
-  if (!percentages.length) return 'unknown'
-  if (percentages.some((value) => value >= 90)) return 'critical'
-  if (percentages.some((value) => value >= 75)) return 'warning'
+  const npuHealthOk = normalizeNpuFlag(node.npu_health_ok)
+  const npuTemperature = Number(node.npu_temperature_celsius)
+  if (
+    npuHealthOk === false ||
+    (Number.isFinite(npuTemperature) && npuTemperature >= 90) ||
+    percentages.some((value) => value >= 90) ||
+    explicit === 'critical'
+  ) return 'critical'
+  const npuExpected = normalizeOptionalBoolean(node.npu_expected)
+  const npuUnavailable = npuExpected === true && (
+    normalizeOptionalBoolean(node.npu_metrics_available) !== true ||
+    normalizeNpuFlag(node.npu_collector_success) === false ||
+    normalizeOptionalBoolean(node.npu_metrics_stale) === true
+  )
+  if (
+    npuUnavailable ||
+    (Number.isFinite(npuTemperature) && npuTemperature >= 80) ||
+    percentages.some((value) => value >= 75) ||
+    explicit === 'warning'
+  ) return 'warning'
+  if (explicit === 'offline') return 'offline'
   return 'normal'
 }
 
@@ -318,7 +363,7 @@ function recordLocalSamples(nodes, timestamp) {
   const sampleTime = toEpochSeconds(timestamp || Date.now())
   nodes.forEach((node) => {
     const aliases = [...new Set([...getLogicalIds(node), ...getPhysicalIds(node)])]
-    DEFAULT_HISTORY_METRICS.forEach((metric) => {
+    LOCAL_HISTORY_METRICS.forEach((metric) => {
       aliases.forEach((alias) => appendLocalPoint(alias, metric, sampleTime, node[metric]))
     })
   })
@@ -590,7 +635,7 @@ async function fetchHistoryMetric(
 async function fetchResourceHistories(
   nodeId,
   physicalNode = '',
-  metrics = DEFAULT_HISTORY_METRICS,
+  metrics = null,
   rangeSeconds = 3600,
   stepSeconds = 60
 ) {
@@ -605,6 +650,13 @@ async function fetchResourceHistories(
   const sameTarget = state.historyNodeId === requestNodeId &&
     state.historyPhysicalNode === requestPhysicalNode
   const previousHistories = sameTarget ? state.histories : {}
+  const resource = getResourceByNode(requestNodeId, requestPhysicalNode) || state.selectedNode
+  const hasNpuData = NPU_HISTORY_METRICS.some((metric) => (
+    resource?.[metric] !== null && resource?.[metric] !== undefined && resource?.[metric] !== ''
+  ))
+  const requestedMetrics = Array.isArray(metrics) && metrics.length
+    ? metrics
+    : [...BASE_HISTORY_METRICS, ...((resource?.npu_expected === true || hasNpuData) ? NPU_HISTORY_METRICS : [])]
   state.historyNodeId = requestNodeId
   state.historyPhysicalNode = requestPhysicalNode
   state.historyRangeSeconds = safeRangeSeconds
@@ -616,7 +668,7 @@ async function fetchResourceHistories(
     state.histories = {}
   }
   try {
-    const results = await Promise.allSettled(metrics.map((metric) => (
+    const results = await Promise.allSettled(requestedMetrics.map((metric) => (
       fetchHistoryMetric(
         requestNodeId,
         requestPhysicalNode,
@@ -628,17 +680,17 @@ async function fetchResourceHistories(
     const histories = {}
     results.forEach((result, index) => {
       if (result.status === 'fulfilled') {
-        histories[metrics[index]] = result.value
+        histories[requestedMetrics[index]] = result.value
       } else {
-        const previousHistory = previousHistories[metrics[index]]
-        histories[metrics[index]] = previousHistory?.points?.length ? {
+        const previousHistory = previousHistories[requestedMetrics[index]]
+        histories[requestedMetrics[index]] = previousHistory?.points?.length ? {
           ...previousHistory,
           stale: true,
           fallback_error: result.reason?.message || ''
         } : (result.reason?.history || {
           node: requestNodeId,
           physical_node: requestPhysicalNode,
-          metric: metrics[index],
+          metric: requestedMetrics[index],
           step: safeStepSeconds,
           points: [],
           source: 'unavailable'
