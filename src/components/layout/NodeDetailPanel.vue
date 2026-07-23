@@ -383,26 +383,16 @@
         <div v-if="editMode" class="model-form">
           <label><span>节点名称</span><input v-model.trim="modelForm.node_name" type="text" /></label>
           <label><span>逻辑 IPv4</span><input v-model.trim="modelForm.logical_ipv4" type="text" /></label>
-          <label><span>逻辑 IPv6</span><input v-model.trim="modelForm.logical_ipv6" type="text" /></label>
           <div class="ip-check-actions">
-            <button type="button" @click="checkIpNow(4)">检查 IPv4</button>
-            <button type="button" @click="checkIpNow(6)">检查 IPv6</button>
+            <button type="button" @click="checkIpNow">检查 IPv4</button>
           </div>
           <div v-if="nodeModelState.ipCheck" class="ip-check-result" :class="{ valid: nodeModelState.ipCheck.valid && !nodeModelState.ipCheck.conflict }">
             {{ formatIpCheck(nodeModelState.ipCheck) }}
           </div>
-          <label><span>物理节点</span><select v-model="modelForm.physical_node" @change="selectPhysicalNode"><option value="">请选择物理节点</option><option v-for="node in physicalNodeOptions" :key="node.physical_node" :value="node.physical_node">{{ node.physical_node }} · {{ node.physical_ipv4 || 'IP 未知' }}{{ node.bound_node_id && node.bound_node_id !== selectedNode.node_id ? ` · 已绑定 ${node.bound_node_id}` : '' }}</option></select></label>
-          <label><span>物理 IPv4（自动带入）</span><input v-model.trim="modelForm.physical_ipv4" type="text" readonly /></label>
-          <label><span>绑定角色</span><input v-model.trim="modelForm.binding_role" type="text" /></label>
           <button type="button" class="primary" :disabled="nodeModelState.saving" @click="saveModelNow">
             保存节点档案
           </button>
-          <button type="button" :disabled="nodeModelState.saving" @click="saveBindingNow">
-            保存物理绑定
-          </button>
-          <button v-if="selectedNode.physical_node" type="button" class="danger" :disabled="nodeModelState.saving" @click="removeBindingNow">
-            解除物理绑定
-          </button>
+          <small class="binding-edit-hint">物理节点绑定请在“半物理节点”模块中管理。</small>
         </div>
       </div>
 
@@ -448,14 +438,10 @@ export default {
       saveModel,
       checkIp,
       allocateIp,
-      releaseIp,
-      saveBinding,
-      removeBinding
+      releaseIp
     } = useNodeModelStore()
     const {
       state: nodeResourceState,
-      fetchResourceService,
-      fetchNodeResources,
       fetchResourceDetail,
       fetchResourceHistories
     } = useResourceStore()
@@ -471,11 +457,7 @@ export default {
       checkNodeIp: checkIp,
       allocateNodeIp: allocateIp,
       releaseNodeIp: releaseIp,
-      saveNodeBinding: saveBinding,
-      removeNodeBinding: removeBinding,
       nodeResourceState,
-      fetchResourceService,
-      fetchNodeResources,
       fetchNodeResource: fetchResourceDetail,
       fetchNodeResourceHistories: fetchResourceHistories,
       nodeLoadState,
@@ -506,11 +488,7 @@ export default {
       releaseVersion: 'both',
       modelForm: {
         node_name: '',
-        logical_ipv4: '',
-        logical_ipv6: '',
-        physical_node: '',
-        physical_ipv4: '',
-        binding_role: ''
+        logical_ipv4: ''
       }
     }
   },
@@ -686,36 +664,6 @@ export default {
     formatNpuMemory() {
       if (this.resourceMetrics?.npu_metrics_available !== true) return '不可用'
       return `${this.formatBytes(this.resourceMetrics.npu_memory_used_bytes)} / ${this.formatBytes(this.resourceMetrics.npu_memory_total_bytes)}`
-    },
-    physicalNodeOptions() {
-      const nodes = new Map()
-      const put = (physicalNode, physicalIpv4 = '', boundNodeId = '') => {
-        const id = String(physicalNode || '').trim()
-        if (!id) return
-        const current = nodes.get(id) || { physical_node: id, physical_ipv4: '', bound_node_id: '' }
-        nodes.set(id, {
-          physical_node: id,
-          physical_ipv4: physicalIpv4 || current.physical_ipv4,
-          bound_node_id: boundNodeId || current.bound_node_id
-        })
-      }
-      this.nodeResourceState.nodes.forEach((node) => {
-        put(
-          node.physical_node || node.physical_node_id || node.worker_node || node.node,
-          node.physical_ipv4 || node.ipv4 || ''
-        )
-      })
-      ;(this.nodeResourceState.status?.node_exporter_targets || []).forEach((target) => {
-        const instance = String(target.instance || '')
-        put(target.node || target.node_id || target.name, instance.replace(/:\d+$/, ''))
-      })
-      this.nodeModelState.bindings.forEach((binding) => {
-        put(binding.physical_node, binding.physical_ipv4, binding.node_id)
-      })
-      put(this.selectedNode?.physical_node, this.selectedNode?.physical_ipv4, this.selectedNode?.node_id)
-      return [...nodes.values()].sort((left, right) => (
-        String(left.physical_node).localeCompare(String(right.physical_node))
-      ))
     }
   },
   watch: {
@@ -733,23 +681,14 @@ export default {
         if (this.editMode && !nodeChanged) return
         this.modelForm = {
           node_name: node?.node_name || '',
-          logical_ipv4: node?.logical_ipv4 || '',
-          logical_ipv6: node?.logical_ipv6 || '',
-          physical_node: node?.physical_node || '',
-          physical_ipv4: node?.physical_ipv4 || node?.ipv4 || '',
-          binding_role: node?.binding_role || ''
+          logical_ipv4: node?.logical_ipv4 || ''
         }
       }
     }
   },
   methods: {
-    async toggleEditMode() {
+    toggleEditMode() {
       this.editMode = !this.editMode
-      if (!this.editMode) return
-      await Promise.allSettled([
-        this.fetchResourceService(),
-        this.fetchNodeResources()
-      ])
     },
     async refreshLoadNow() {
       if (!this.selectedNode?.node_id || !this.selectedNode?.physical_node) return
@@ -905,8 +844,7 @@ export default {
       try {
         await this.saveNodeModel(this.selectedNode.node_id, {
           node_name: this.optional(this.modelForm.node_name),
-          logical_ipv4: this.optional(this.modelForm.logical_ipv4),
-          logical_ipv6: this.optional(this.modelForm.logical_ipv6)
+          logical_ipv4: this.optional(this.modelForm.logical_ipv4)
         })
         this.editMode = false
         this.showFeedback('节点档案已保存', 'success')
@@ -914,8 +852,8 @@ export default {
         this.showFeedback(error?.message || this.nodeModelState.error || '保存节点档案失败', 'error')
       }
     },
-    async checkIpNow(version) {
-      const ip = version === 4 ? this.modelForm.logical_ipv4 : this.modelForm.logical_ipv6
+    async checkIpNow() {
+      const ip = this.modelForm.logical_ipv4
       if (!ip || !this.selectedNode?.node_id) return
       try {
         await this.checkNodeIp({
@@ -955,52 +893,6 @@ export default {
       if (!window.confirm(`确定释放 ${this.selectedNode.node_id} 的 ${label} 地址吗？`)) return
       try {
         await this.releaseNodeIp(this.selectedNode.node_id, this.releaseVersion)
-      } catch (_) {
-        // 错误由共享状态显示。
-      }
-    },
-    async saveBindingNow() {
-      if (!this.selectedNode?.node_id || !this.modelForm.physical_node) return
-      try {
-        const occupiedBindings = this.nodeModelState.bindings.filter((binding) => (
-          binding.physical_node === this.modelForm.physical_node &&
-          binding.node_id !== this.selectedNode.node_id
-        ))
-        if (occupiedBindings.length) {
-          const occupiedNodeIds = occupiedBindings.map((binding) => binding.node_id).join('、')
-          if (!window.confirm(
-            `物理节点 ${this.modelForm.physical_node} 当前已绑定 ${occupiedNodeIds}，是否解除原绑定并切换到 ${this.selectedNode.node_id}？`
-          )) return
-          for (const binding of occupiedBindings) {
-            await this.removeNodeBinding(binding.node_id)
-          }
-        }
-        await this.saveNodeBinding({
-          node_id: this.selectedNode.node_id,
-          physical_node: this.modelForm.physical_node,
-          physical_ipv4: this.optional(this.modelForm.physical_ipv4),
-          binding_role: this.optional(this.modelForm.binding_role)
-        })
-        this.showFeedback(`已将 ${this.selectedNode.node_id} 绑定到 ${this.modelForm.physical_node}`, 'success')
-      } catch (error) {
-        this.showFeedback(error?.message || this.nodeModelState.error || '保存物理绑定失败', 'error')
-      }
-    },
-    selectPhysicalNode() {
-      const selected = this.physicalNodeOptions.find(
-        (node) => node.physical_node === this.modelForm.physical_node
-      )
-      this.modelForm.physical_ipv4 = selected?.physical_ipv4 || ''
-      if (!this.modelForm.binding_role) this.modelForm.binding_role = 'edge-worker'
-    },
-    async removeBindingNow() {
-      if (!this.selectedNode?.node_id) return
-      if (!window.confirm(`确定解除 ${this.selectedNode.node_id} 的物理节点绑定吗？`)) return
-      try {
-        await this.removeNodeBinding(this.selectedNode.node_id)
-        this.modelForm.physical_node = ''
-        this.modelForm.physical_ipv4 = ''
-        this.modelForm.binding_role = ''
       } catch (_) {
         // 错误由共享状态显示。
       }
@@ -1768,6 +1660,14 @@ button:disabled {
   color: #baffeb;
   border-color: rgba(56, 255, 183, .46);
   background: rgba(56, 255, 183, .08);
+}
+
+.binding-edit-hint {
+  display: block;
+  grid-column: 1 / -1;
+  color: rgba(201, 255, 247, .5);
+  font-size: 10px;
+  line-height: 1.5;
 }
 
 .success-box,
